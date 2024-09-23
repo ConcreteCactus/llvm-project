@@ -57,6 +57,7 @@
 #include "ReservedIdentifierCheck.h"
 #include "ReturnConstRefFromParameterCheck.h"
 #include "SharedPtrArrayMismatchCheck.h"
+#include "SideEffectsBetweenSequencePointsCheck.h"
 #include "SignalHandlerCheck.h"
 #include "SignedCharMisuseCheck.h"
 #include "SizeofContainerCheck.h"
@@ -102,6 +103,8 @@ public:
   void addCheckFactories(ClangTidyCheckFactories &CheckFactories) override {
     CheckFactories.registerCheck<ArgumentCommentCheck>(
         "bugprone-argument-comment");
+    CheckFactories.registerCheck<SideEffectsBetweenSequencePointsCheck>(
+        "bugprone-side-effect-between-seq-check");
     CheckFactories.registerCheck<AssertSideEffectCheck>(
         "bugprone-assert-side-effect");
     CheckFactories.registerCheck<AssignmentInIfConditionCheck>(
