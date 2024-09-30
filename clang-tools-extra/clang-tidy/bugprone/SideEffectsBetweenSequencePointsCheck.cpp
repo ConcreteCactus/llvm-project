@@ -59,8 +59,55 @@ AST_MATCHER_P(CallExpr, hasFunctionFrom,
     return false;
 }
 
-AST_MATCHER_P(Stmt, twoOfBetweenSequencePoints,
-        ExpressionMatcher, InnerMatcher) {
+AST_MATCHER_P2(Expr, dynamicBind,
+        BindingNameGenerator*    , NameGenerator,
+        ExpressionMatcher        , InnerMatcher) {
+    if(InnerMatcher.matches(Node, Finder, Builder)) {
+        StringRef BindingName = NameGenerator->generateNextBindingName();
+        Builder->setBinding(BindingName, DynTypedNode::create(Node));
+        return true;
+    }
+    return false;
+}
+
+AST_MATCHER_P2(Expr, findAllBetweenSequencePoints,
+        ExpressionMatcher       , InnerMatcher, 
+        IBindingNameOwner*      , NameOwner) {
+    const Stmt* S = &Node;
+
+    BindingNameGenerator NameGenerator;
+    NameGenerator.Owner = NameOwner;
+    NameGenerator.Counter = 0;
+
+    ExpressionMatcher BoundInnerMatcher = dynamicBind(
+            &NameGenerator, InnerMatcher);
+    ExpressionMatcher MultilevelInnerMatcher 
+        = expr(hasDescendant(expr(BoundInnerMatcher)));
+
+    if(const auto* Op = dyn_cast<BinaryOperator>(S)) {
+        BinaryOperator::Opcode Code = Op->getOpcode();
+        if(Code == BO_LAnd || Code == BO_LOr || Code == BO_Comma) {
+            return false;
+        }
+        return
+            MultilevelInnerMatcher.matches(*Op->getLHS(), Finder, Builder) &&
+            MultilevelInnerMatcher.matches(*Op->getRHS(), Finder, Builder);
+    }
+
+    if(const auto* C = dyn_cast<CallExpr>(S)) {
+        int MatchCnt = 0;
+        for(size_t I = 0; I < C->getNumArgs(); I++) {
+            if(MultilevelInnerMatcher.matches(
+                        *C->getArgs()[I], Finder, Builder)) {
+                MatchCnt++;
+            }
+        }
+        if(MatchCnt >= 2) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 SideEffectsBetweenSequencePointsCheck::SideEffectsBetweenSequencePointsCheck(
@@ -104,6 +151,14 @@ SideEffectsBetweenSequencePointsCheck::FunctionCallback::
 
 void SideEffectsBetweenSequencePointsCheck::FunctionCallback::run(
         const MatchFinder::MatchResult& Result) {
+}
+
+StringRef SideEffectsBetweenSequencePointsCheck::generateBindingName(
+        uint32_t Id) {
+    for(uint32_t I = BindingNames.size(); I <= Id; I++) {
+        BindingNames.push_back(std::to_string(I));
+    }
+    return BindingNames[Id];
 }
 
 } // namespace clang::tidy::bugprone
