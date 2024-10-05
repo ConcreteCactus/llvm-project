@@ -59,51 +59,34 @@ AST_MATCHER_P(CallExpr, hasFunctionFrom,
     return false;
 }
 
-AST_MATCHER_P2(Expr, dynamicBind,
-        BindingNameGenerator*    , NameGenerator,
-        ExpressionMatcher        , InnerMatcher) {
-    if(InnerMatcher.matches(Node, Finder, Builder)) {
-        StringRef BindingName = NameGenerator->generateNextBindingName();
-        Builder->setBinding(BindingName, DynTypedNode::create(Node));
-        return true;
-    }
-    return false;
-}
+AST_MATCHER(Expr, twoGlobalWritesBetweenSequencePoints) {
+    const Expr* E = &Node;
 
-AST_MATCHER_P2(Expr, findAllBetweenSequencePoints,
-        ExpressionMatcher       , InnerMatcher, 
-        IBindingNameOwner*      , NameOwner) {
-    const Stmt* S = &Node;
+    const ast_matchers::internal::Matcher<Expr> GlobalMatcher = 
+        hasDescendant(declRefExpr(globalVarExpr()));
 
-    BindingNameGenerator NameGenerator;
-    NameGenerator.Owner = NameOwner;
-    NameGenerator.Counter = 0;
-
-    ExpressionMatcher BoundInnerMatcher = dynamicBind(
-            &NameGenerator, InnerMatcher);
-    ExpressionMatcher MultilevelInnerMatcher 
-        = expr(hasDescendant(expr(BoundInnerMatcher)));
-
-    if(const auto* Op = dyn_cast<BinaryOperator>(S)) {
-        BinaryOperator::Opcode Code = Op->getOpcode();
+    if(const BinaryOperator* Op = dyn_cast<BinaryOperator>(E)) {
+        const BinaryOperator::Opcode Code = Op->getOpcode();
         if(Code == BO_LAnd || Code == BO_LOr || Code == BO_Comma) {
             return false;
         }
-        return
-            MultilevelInnerMatcher.matches(*Op->getLHS(), Finder, Builder) &&
-            MultilevelInnerMatcher.matches(*Op->getRHS(), Finder, Builder);
-    }
 
-    if(const auto* C = dyn_cast<CallExpr>(S)) {
-        int MatchCnt = 0;
-        for(size_t I = 0; I < C->getNumArgs(); I++) {
-            if(MultilevelInnerMatcher.matches(
-                        *C->getArgs()[I], Finder, Builder)) {
-                MatchCnt++;
+        SideEffectsBetweenSequencePointsCheck::GlobalASTVisitor LeftVisitor;
+        SideEffectsBetweenSequencePointsCheck::GlobalASTVisitor RightVisitor;
+        LeftVisitor.TraverseStmt(Op->getLHS());
+        RightVisitor.TraverseStmt(Op->getRHS());
+        const std::vector<DeclarationName>& LeftFound = 
+            LeftVisitor.getGlobalsFound();
+        const std::vector<DeclarationName>& RightFound = 
+            RightVisitor.getGlobalsFound();
+        for(uint32_t I = 0; I < LeftFound.size(); I++) {
+            for(uint32_t J = 0; J < RightFound.size(); J++) {
+                if(LeftFound[I] == RightFound[J]) {
+                    std::cout << "Found with name: " 
+                              << LeftFound[I].getAsString()
+                              << std::endl;
+                }
             }
-        }
-        if(MatchCnt >= 2) {
-            return true;
         }
     }
 
@@ -153,12 +136,26 @@ void SideEffectsBetweenSequencePointsCheck::FunctionCallback::run(
         const MatchFinder::MatchResult& Result) {
 }
 
-StringRef SideEffectsBetweenSequencePointsCheck::generateBindingName(
-        uint32_t Id) {
-    for(uint32_t I = BindingNames.size(); I <= Id; I++) {
-        BindingNames.push_back(std::to_string(I));
+bool SideEffectsBetweenSequencePointsCheck::GlobalASTVisitor::
+    VisitStmt(Stmt* S) {
+    if(!isa<DeclRefExpr>(S)) {
+        return false;
     }
-    return BindingNames[Id];
+    const auto* DR = dyn_cast<DeclRefExpr>(S);
+    if(!isa<VarDecl>(DR->getDecl())) {
+        return false;
+    }
+    const auto* VD = dyn_cast<VarDecl>(DR->getDecl());
+    if(VD->hasGlobalStorage()) {
+        GlobalsFound.push_back(VD->getDeclName());
+        return true;
+    }
+    return false;
+}
+
+const std::vector<DeclarationName>& SideEffectsBetweenSequencePointsCheck::
+                                    GlobalASTVisitor::getGlobalsFound() {
+    return GlobalsFound;
 }
 
 } // namespace clang::tidy::bugprone

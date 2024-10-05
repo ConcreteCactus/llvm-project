@@ -4,6 +4,7 @@ POINTSCHECK_H
 POINTSCHECK_H
 
 #include "../ClangTidyCheck.h"
+#include "clang/AST/RecursiveASTVisitor.h"
 
 namespace clang::tidy::bugprone {
 
@@ -42,6 +43,14 @@ public:
         void run(const ast_matchers::MatchFinder::MatchResult& Result) override;
     private:
         SideEffectsBetweenSequencePointsCheck* const Check;
+    };
+
+    class GlobalASTVisitor : public RecursiveASTVisitor<GlobalASTVisitor> {
+    public:
+        bool VisitStmt(Stmt* S);
+        const std::vector<DeclarationName>& getGlobalsFound();
+    private:
+        std::vector<DeclarationName> GlobalsFound;
     };
 
 private:
