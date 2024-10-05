@@ -8,34 +8,12 @@ POINTSCHECK_H
 
 namespace clang::tidy::bugprone {
 
-// The purpose of this interface is to create binding names for special
-// matchers. The implementers of this interface will need to be able to
-// own the generated Strings.
-class IBindingNameOwner {
-public:
-    virtual StringRef generateBindingName(uint32_t Id) = 0;
-};
-
-using BindingNameGenerator = struct BindingNameGenerator {
-    IBindingNameOwner* Owner;
-    int Counter;
-
-    StringRef generateNextBindingName() {
-        StringRef Name = Owner->generateBindingName(Counter);
-        Counter++;
-        return Name;
-    }
-};
-
-class SideEffectsBetweenSequencePointsCheck : public ClangTidyCheck,
-                                              public IBindingNameOwner {
+class SideEffectsBetweenSequencePointsCheck : public ClangTidyCheck {
 public:
     SideEffectsBetweenSequencePointsCheck(StringRef Name,
                                           ClangTidyContext* Context);
     void registerMatchers(ast_matchers::MatchFinder *Finder) override;
     void check(const ast_matchers::MatchFinder::MatchResult &Result) override;
-
-    StringRef generateBindingName(uint32_t Id) override;
 
     class FunctionCallback : public MatchCallback {
     public:
@@ -47,16 +25,18 @@ public:
 
     class GlobalASTVisitor : public RecursiveASTVisitor<GlobalASTVisitor> {
     public:
-        bool VisitStmt(Stmt* S);
-        const std::vector<DeclarationName>& getGlobalsFound();
+        bool VisitDeclRefExpr(DeclRefExpr* S);
+        bool VisitExpr(Expr* S);
+        const std::vector<std::pair<DeclarationName, bool>>& getGlobalsFound();
     private:
-        std::vector<DeclarationName> GlobalsFound;
+        std::vector<std::pair<DeclarationName, bool>> GlobalsFound;
+        static bool isGlobalDecl(const VarDecl* D);
+        static bool isGlobalExpr(const Expr*    E);
     };
 
 private:
     FunctionCallback             FuncCallback;
     std::vector<DeclarationName> FunctionNames;
-    std::vector<std::string>     BindingNames;
 };
 
 } // namespace clang::tidy::bugprone

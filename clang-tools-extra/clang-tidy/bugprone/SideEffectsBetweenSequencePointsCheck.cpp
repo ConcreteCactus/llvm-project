@@ -1,6 +1,4 @@
 #include "SideEffectsBetweenSequencePointsCheck.h"
-#include "../utils/Matchers.h"
-#include <iostream>
 
 using namespace clang::ast_matchers;
 
@@ -49,7 +47,6 @@ AST_MATCHER_P(CallExpr, hasFunctionFrom,
     if(!D) {
         return false;
     }
-
     for(size_t I = 0; I < PossibleNames.get().size(); I++) {
         if(PossibleNames.get()[I] == D->getDeclName()) {
             return true;
@@ -75,16 +72,15 @@ AST_MATCHER(Expr, twoGlobalWritesBetweenSequencePoints) {
         SideEffectsBetweenSequencePointsCheck::GlobalASTVisitor RightVisitor;
         LeftVisitor.TraverseStmt(Op->getLHS());
         RightVisitor.TraverseStmt(Op->getRHS());
-        const std::vector<DeclarationName>& LeftFound = 
+        const std::vector<std::pair<DeclarationName, bool>>& LeftFound = 
             LeftVisitor.getGlobalsFound();
-        const std::vector<DeclarationName>& RightFound = 
+        const std::vector<std::pair<DeclarationName, bool>>& RightFound = 
             RightVisitor.getGlobalsFound();
         for(uint32_t I = 0; I < LeftFound.size(); I++) {
             for(uint32_t J = 0; J < RightFound.size(); J++) {
-                if(LeftFound[I] == RightFound[J]) {
-                    std::cout << "Found with name: " 
-                              << LeftFound[I].getAsString()
-                              << std::endl;
+                if(LeftFound[I].first == RightFound[J].first &&
+                        (LeftFound[I].second || RightFound[J].second)) {
+                    return true;
                 }
             }
         }
@@ -101,30 +97,16 @@ SideEffectsBetweenSequencePointsCheck::SideEffectsBetweenSequencePointsCheck(
 
 void SideEffectsBetweenSequencePointsCheck::registerMatchers(
         MatchFinder* Finder) {
-    const ast_matchers::internal::VariadicDynCastAllOfMatcher<Expr, DeclRefExpr>
-        DeclToExpr;
-    auto FuncWithGlobalVarChange = 
-        functionDecl(
-            hasDescendant(
-                expr(
-                    writeOf(
-                        DeclToExpr(
-                            globalVarExpr()))))).bind("gFunc");
-    Finder->addMatcher(FuncWithGlobalVarChange, this);
-
-    auto FuncWithGlobalVarChangeFunc =
-        functionDecl(
-                hasDescendant(
-                    callExpr(hasFunctionFrom(FunctionNames)))).bind("gFunc");
-    Finder->addMatcher(FuncWithGlobalVarChangeFunc, this);
+    Finder->addMatcher(
+            stmt(hasDescendant(expr(twoGlobalWritesBetweenSequencePoints())
+                    .bind("gw"))), this);
 }
 
 void SideEffectsBetweenSequencePointsCheck::check(
         const MatchFinder::MatchResult& Result) {
-    const FunctionDecl* FD = Result.Nodes.getNodeAs<FunctionDecl>("gFunc");
-    FunctionNames.push_back(FD->getDeclName());
-    if(FD && FD->getBeginLoc().isValid()) {
-        diag(FD->getBeginLoc(), "write of global variable in function");
+    const Expr* E = Result.Nodes.getNodeAs<Expr>("gw");
+    if(E && E->getBeginLoc().isValid()) {
+        diag(E->getBeginLoc(), "read/write conflict on global variable");
     }
 }
 
@@ -137,24 +119,72 @@ void SideEffectsBetweenSequencePointsCheck::FunctionCallback::run(
 }
 
 bool SideEffectsBetweenSequencePointsCheck::GlobalASTVisitor::
-    VisitStmt(Stmt* S) {
-    if(!isa<DeclRefExpr>(S)) {
-        return false;
-    }
-    const auto* DR = dyn_cast<DeclRefExpr>(S);
-    if(!isa<VarDecl>(DR->getDecl())) {
-        return false;
-    }
-    const auto* VD = dyn_cast<VarDecl>(DR->getDecl());
-    if(VD->hasGlobalStorage()) {
-        GlobalsFound.push_back(VD->getDeclName());
-        return true;
-    }
-    return false;
+    isGlobalDecl(const VarDecl* VD) {
+    return 
+        VD->hasGlobalStorage() && 
+        VD->getLocation().isValid() &&
+        !VD->getType().isConstQualified();
 }
 
-const std::vector<DeclarationName>& SideEffectsBetweenSequencePointsCheck::
-                                    GlobalASTVisitor::getGlobalsFound() {
+bool SideEffectsBetweenSequencePointsCheck::GlobalASTVisitor::
+    VisitDeclRefExpr(DeclRefExpr* DR) {
+    if(!isa<VarDecl>(DR->getDecl())) {
+        return true;
+    }
+    const auto* VD = dyn_cast<VarDecl>(DR->getDecl());
+    if(isGlobalDecl(VD)) {
+        GlobalsFound.emplace_back(VD->getDeclName(), false);
+        return true;
+    }
+    return true;
+}
+
+bool SideEffectsBetweenSequencePointsCheck::GlobalASTVisitor::
+    VisitExpr(Expr* E) {
+
+    Expr* Modified = nullptr;
+
+    if(const auto* Op = dyn_cast<UnaryOperator>(E)) {
+        UnaryOperator::Opcode Code = Op->getOpcode();
+        if(Code == UO_PostInc || Code == UO_PostDec
+        || Code == UO_PreInc  || Code == UO_PreDec) {
+            Modified = Op->getSubExpr();
+        } else {
+            return true;
+        }
+    }
+
+    if(const auto* Op = dyn_cast<BinaryOperator>(E)) {
+        if(Op->isAssignmentOp()) {
+            Modified = Op->getLHS();
+        } else {
+            return true;
+        }
+    }
+
+    if(!Modified) {
+        return true;
+    }
+
+    if(!isa<DeclRefExpr>(Modified)) {
+        return true;
+    }
+    const auto* DE = dyn_cast<DeclRefExpr>(Modified);
+
+    if(!isa<VarDecl>(DE->getDecl())) {
+        return true;
+    }
+    const auto* VD = dyn_cast<VarDecl>(DE->getDecl());
+
+    if(isGlobalDecl(VD)) {
+        GlobalsFound.emplace_back(VD->getDeclName(), true);
+        return false;
+    }
+    return true;
+}
+
+const std::vector<std::pair<DeclarationName, bool>>& 
+SideEffectsBetweenSequencePointsCheck::GlobalASTVisitor::getGlobalsFound() {
     return GlobalsFound;
 }
 
