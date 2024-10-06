@@ -4,6 +4,12 @@ using namespace clang::ast_matchers;
 
 namespace clang::tidy::bugprone {
 
+using GlobalRWAggregation = 
+    SideEffectsBetweenSequencePointsCheck::GlobalRWAggregation;
+using GlobalRWVisitor =
+    SideEffectsBetweenSequencePointsCheck::GlobalRWVisitor;
+
+
 AST_MATCHER(DeclRefExpr, globalVarExpr) {
     const DeclRefExpr* E = &Node;
     const ValueDecl* D = E->getDecl();
@@ -62,47 +68,48 @@ AST_MATCHER(Expr, twoGlobalWritesBetweenSequencePoints) {
     const ast_matchers::internal::Matcher<Expr> GlobalMatcher = 
         hasDescendant(declRefExpr(globalVarExpr()));
 
+    GlobalRWVisitor Visitor;
+
     if(const BinaryOperator* Op = dyn_cast<BinaryOperator>(E)) {
         const BinaryOperator::Opcode Code = Op->getOpcode();
         if(Code == BO_LAnd || Code == BO_LOr || Code == BO_Comma) {
             return false;
         }
+        Visitor.startTraversal(Op->getLHS());
+        Visitor.startTraversal(Op->getRHS());
+    }
 
-        SideEffectsBetweenSequencePointsCheck::GlobalASTVisitor LeftVisitor;
-        SideEffectsBetweenSequencePointsCheck::GlobalASTVisitor RightVisitor;
-        LeftVisitor.TraverseStmt(Op->getLHS());
-        RightVisitor.TraverseStmt(Op->getRHS());
-        const std::vector<std::pair<DeclarationName, bool>>& LeftFound = 
-            LeftVisitor.getGlobalsFound();
-        const std::vector<std::pair<DeclarationName, bool>>& RightFound = 
-            RightVisitor.getGlobalsFound();
-        for(uint32_t I = 0; I < LeftFound.size(); I++) {
-            for(uint32_t J = 0; J < RightFound.size(); J++) {
-                if(LeftFound[I].first == RightFound[J].first &&
-                        (LeftFound[I].second || RightFound[J].second)) {
-                    return true;
-                }
-            }
+    if(const CallExpr* CE = dyn_cast<CallExpr>(E)) {
+        for(uint32_t I = 0; I < CE->getNumArgs(); I++) {
+            //NOLINTNEXTLINE
+            Visitor.startTraversal((Expr*)(CE->getArg(I)));
         }
     }
 
+    std::vector<GlobalRWAggregation> Globals = Visitor.getGlobalsFound();
+    for(uint32_t I = 0; I < Globals.size(); I++) {
+        if(Globals[I].hasConflict()) {
+            return true;
+        }
+    }
     return false;
 }
 
 SideEffectsBetweenSequencePointsCheck::SideEffectsBetweenSequencePointsCheck(
         StringRef Name,
         ClangTidyContext* Context)
-    : ClangTidyCheck(Name, Context),
-    FuncCallback(this) {}
+    : ClangTidyCheck(Name, Context) {}
 
-void SideEffectsBetweenSequencePointsCheck::registerMatchers(
+void
+SideEffectsBetweenSequencePointsCheck::registerMatchers(
         MatchFinder* Finder) {
     Finder->addMatcher(
             stmt(hasDescendant(expr(twoGlobalWritesBetweenSequencePoints())
                     .bind("gw"))), this);
 }
 
-void SideEffectsBetweenSequencePointsCheck::check(
+void
+SideEffectsBetweenSequencePointsCheck::check(
         const MatchFinder::MatchResult& Result) {
     const Expr* E = Result.Nodes.getNodeAs<Expr>("gw");
     if(E && E->getBeginLoc().isValid()) {
@@ -110,38 +117,36 @@ void SideEffectsBetweenSequencePointsCheck::check(
     }
 }
 
-SideEffectsBetweenSequencePointsCheck::FunctionCallback::
-    FunctionCallback(SideEffectsBetweenSequencePointsCheck* Check)
-    : Check(Check) {}
-
-void SideEffectsBetweenSequencePointsCheck::FunctionCallback::run(
-        const MatchFinder::MatchResult& Result) {
+void
+GlobalRWVisitor::startTraversal(Expr* E) {
+    TraversalIndex++;
+    FunctionsChecked.clear();
+    TraverseStmt(E);
 }
 
-bool SideEffectsBetweenSequencePointsCheck::GlobalASTVisitor::
-    isGlobalDecl(const VarDecl* VD) {
+bool
+GlobalRWVisitor::isGlobalDecl(const VarDecl* VD) {
     return 
         VD->hasGlobalStorage() && 
         VD->getLocation().isValid() &&
         !VD->getType().isConstQualified();
 }
 
-bool SideEffectsBetweenSequencePointsCheck::GlobalASTVisitor::
-    VisitDeclRefExpr(DeclRefExpr* DR) {
+bool
+GlobalRWVisitor::VisitDeclRefExpr(DeclRefExpr* DR) {
     if(!isa<VarDecl>(DR->getDecl())) {
         return true;
     }
     const auto* VD = dyn_cast<VarDecl>(DR->getDecl());
     if(isGlobalDecl(VD)) {
-        GlobalsFound.emplace_back(VD->getDeclName(), false);
+        addGlobal(VD->getDeclName(), VD->getBeginLoc(), false);
         return true;
     }
     return true;
 }
 
-bool SideEffectsBetweenSequencePointsCheck::GlobalASTVisitor::
-    VisitExpr(Expr* E) {
-
+bool
+GlobalRWVisitor::VisitExpr(Expr* E) {
     Expr* Modified = nullptr;
 
     if(const auto* Op = dyn_cast<UnaryOperator>(E)) {
@@ -177,15 +182,99 @@ bool SideEffectsBetweenSequencePointsCheck::GlobalASTVisitor::
     const auto* VD = dyn_cast<VarDecl>(DE->getDecl());
 
     if(isGlobalDecl(VD)) {
-        GlobalsFound.emplace_back(VD->getDeclName(), true);
+        addGlobal(VD->getDeclName(), VD->getBeginLoc(), true);
         return false;
     }
     return true;
 }
 
-const std::vector<std::pair<DeclarationName, bool>>& 
-SideEffectsBetweenSequencePointsCheck::GlobalASTVisitor::getGlobalsFound() {
+bool
+GlobalRWVisitor::TraverseStmt(Stmt* S, DataRecursionQueue* Queue) {
+    bool Result = RecursiveASTVisitor<GlobalRWVisitor>::TraverseStmt(S, Queue);
+
+    if(!isa<CallExpr>(S)) {
+        return Result;
+    }
+    const auto* CE = dyn_cast<CallExpr>(S);
+
+    if(!isa<FunctionDecl>(CE->getCalleeDecl())) {
+        return Result;
+    }
+    const auto* FD = dyn_cast<FunctionDecl>(CE->getCalleeDecl());
+
+    if(!FD->hasBody()) {
+        return Result;
+    }
+
+    for(uint32_t I = 0; I < FunctionsChecked.size(); I++) {
+        if(FunctionsChecked[I] == FD->getDeclName()) {
+            return Result;
+        }
+    }
+    FunctionsChecked.push_back(FD->getDeclName());
+    TraverseStmt(FD->getBody(), Queue);
+
+    return Result;
+}
+
+const std::vector<GlobalRWAggregation>& 
+GlobalRWVisitor::getGlobalsFound() {
     return GlobalsFound;
+}
+
+void
+GlobalRWVisitor::addGlobal(DeclarationName Name, SourceLocation Loc,
+                           bool IsWrite) {
+    for(uint32_t I = 0; I < GlobalsFound.size(); I++) {
+        if(GlobalsFound[I].getDeclName() == Name) {
+            GlobalsFound[I].addGlobalRW(Loc, IsWrite, TraversalIndex);
+            return;
+        }
+    }
+
+    GlobalsFound.emplace_back(Name, Loc, IsWrite, TraversalIndex);
+}
+
+GlobalRWAggregation::GlobalRWAggregation(DeclarationName Name,
+                                         SourceLocation  Loc,
+                                         bool            IsWrite,
+                                         int             Index)
+    : DeclName(Name), IndexCreated(Index), HasWrite(IsWrite),
+      HasConflict(false) {
+
+    if(IsWrite) {
+        WritePos = Loc;
+    } else {
+        OtherPos = Loc;
+    }
+}
+
+void
+GlobalRWAggregation::addGlobalRW(SourceLocation Loc, bool IsWrite, int Index) {
+    if(HasConflict || (!IsWrite && !HasWrite)) {
+        return;
+    }
+
+    if(HasWrite) {
+        OtherPos = Loc;
+    } else {
+        WritePos = Loc;
+        HasWrite = true;
+    }
+
+    if(IndexCreated != Index) {
+        HasConflict = true;
+    }
+}
+
+DeclarationName
+GlobalRWAggregation::getDeclName() {
+    return DeclName;
+}
+
+bool
+GlobalRWAggregation::hasConflict() {
+    return HasConflict;
 }
 
 } // namespace clang::tidy::bugprone
