@@ -9,65 +9,8 @@ using GlobalRWAggregation =
 using GlobalRWVisitor =
     SideEffectsBetweenSequencePointsCheck::GlobalRWVisitor;
 
-
-AST_MATCHER(DeclRefExpr, globalVarExpr) {
-    const DeclRefExpr* E = &Node;
-    const ValueDecl* D = E->getDecl();
-    if(!isa<VarDecl>(D)) {
-        return false;
-    }
-    const VarDecl* VarD = dyn_cast<VarDecl>(D);
-
-    return VarD->getLocation().isValid()
-        && VarD->hasGlobalStorage()
-        && !VarD->getType().isConstQualified();
-}
-
-using ExpressionMatcher = ast_matchers::internal::Matcher<Expr>;
-
-AST_MATCHER_P(Expr, writeOf, ExpressionMatcher, InnerMatcher) {
-    const Expr* E = &Node;
-
-    if(const auto* Op = dyn_cast<UnaryOperator>(E)) {
-        UnaryOperator::Opcode Code = Op->getOpcode();
-        if(Code == UO_PostInc || Code == UO_PostDec
-        || Code == UO_PreInc  || Code == UO_PreDec) {
-            return InnerMatcher.matches(*Op->getSubExpr(), Finder, Builder);
-        }
-        return false;
-    }
-
-    if(const auto* Op = dyn_cast<BinaryOperator>(E)) {
-        if(Op->isAssignmentOp()) {
-            return InnerMatcher.matches(*Op->getLHS(), Finder, Builder);
-        }
-    }
-    return false;
-}
-
-AST_MATCHER_P(CallExpr, hasFunctionFrom,
-        std::reference_wrapper<const std::vector<DeclarationName>>,
-        PossibleNames) {
-    const CallExpr* E = &Node;
-    const FunctionDecl* D = E->getDirectCallee();
-    if(!D) {
-        return false;
-    }
-    for(size_t I = 0; I < PossibleNames.get().size(); I++) {
-        if(PossibleNames.get()[I] == D->getDeclName()) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
 AST_MATCHER(Expr, twoGlobalWritesBetweenSequencePoints) {
     const Expr* E = &Node;
-
-    const ast_matchers::internal::Matcher<Expr> GlobalMatcher = 
-        hasDescendant(declRefExpr(globalVarExpr()));
-
     GlobalRWVisitor Visitor;
 
     if(const BinaryOperator* Op = dyn_cast<BinaryOperator>(E)) {
