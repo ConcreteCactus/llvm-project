@@ -81,8 +81,7 @@ AST_MATCHER(Expr, twoGlobalWritesBetweenSequencePoints) {
 
     if(const CallExpr* CE = dyn_cast<CallExpr>(E)) {
         for(uint32_t I = 0; I < CE->getNumArgs(); I++) {
-            //NOLINTNEXTLINE
-            Visitor.startTraversal((Expr*)(CE->getArg(I)));
+            Visitor.startTraversal(const_cast<Expr*>(CE->getArg(I)));
         }
     }
 
@@ -104,7 +103,7 @@ void
 SideEffectsBetweenSequencePointsCheck::registerMatchers(
         MatchFinder* Finder) {
     Finder->addMatcher(
-            stmt(hasDescendant(expr(twoGlobalWritesBetweenSequencePoints())
+            stmt(traverse(TK_AsIs, expr(twoGlobalWritesBetweenSequencePoints())
                     .bind("gw"))), this);
 }
 
@@ -147,7 +146,7 @@ GlobalRWVisitor::VisitDeclRefExpr(DeclRefExpr* DR) {
 
 bool
 GlobalRWVisitor::VisitExpr(Expr* E) {
-    Expr* Modified = nullptr;
+    const Expr* Modified = nullptr;
 
     if(const auto* Op = dyn_cast<UnaryOperator>(E)) {
         UnaryOperator::Opcode Code = Op->getOpcode();
@@ -164,6 +163,22 @@ GlobalRWVisitor::VisitExpr(Expr* E) {
             Modified = Op->getLHS();
         } else {
             return true;
+        }
+    }
+
+    if(const auto *OpCallExpr = dyn_cast<CXXOperatorCallExpr>(E)) {
+        if(const auto* MethodDecl =
+            dyn_cast_or_null<CXXMethodDecl>(OpCallExpr->getDirectCallee())) {
+            if(MethodDecl->isConst()) {
+                return true;
+            }
+        }
+
+        OverloadedOperatorKind OpKind = OpCallExpr->getOperator();
+        if(OpCallExpr->isAssignmentOp() || OpKind == OO_PlusPlus 
+        || OpKind == OO_MinusMinus || OpKind == OO_LessLess
+        || OpKind == OO_GreaterGreater) {
+            Modified = OpCallExpr->getArg(0);
         }
     }
 
