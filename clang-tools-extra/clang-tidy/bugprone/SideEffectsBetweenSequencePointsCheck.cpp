@@ -62,6 +62,7 @@ SideEffectsBetweenSequencePointsCheck::check(
 void
 GlobalRWVisitor::startTraversal(Expr* E) {
     TraversalIndex++;
+    IsInsideAFunction = false;
     FunctionsChecked.clear();
     TraverseStmt(E);
 }
@@ -170,7 +171,12 @@ GlobalRWVisitor::TraverseStmt(Stmt* S, DataRecursionQueue* Queue) {
         }
     }
     FunctionsChecked.push_back(FD->getDeclName());
+    bool StartedOutsideFunction = IsInsideAFunction;
+    IsInsideAFunction = true;
     TraverseStmt(FD->getBody(), Queue);
+    if(!StartedOutsideFunction) {
+        IsInsideAFunction = false;
+    }
 
     return Result;
 }
@@ -185,20 +191,23 @@ GlobalRWVisitor::addGlobal(DeclarationName Name, SourceLocation Loc,
                            bool IsWrite) {
     for(uint32_t I = 0; I < GlobalsFound.size(); I++) {
         if(GlobalsFound[I].getDeclName() == Name) {
-            GlobalsFound[I].addGlobalRW(Loc, IsWrite, TraversalIndex);
+            GlobalsFound[I].addGlobalRW(Loc, IsWrite, TraversalIndex,
+                                        IsInsideAFunction);
             return;
         }
     }
 
-    GlobalsFound.emplace_back(Name, Loc, IsWrite, TraversalIndex);
+    GlobalsFound.emplace_back(Name, Loc, IsWrite, TraversalIndex,
+                              IsInsideAFunction);
 }
 
 GlobalRWAggregation::GlobalRWAggregation(DeclarationName Name,
                                          SourceLocation  Loc,
                                          bool            IsWrite,
-                                         int             Index)
+                                         int             Index,
+                                         bool            IsInFunction)
     : DeclName(Name), IndexCreated(Index), HasWrite(IsWrite),
-      HasConflict(false) {
+      HasConflict(false), IsAnyInFunction(IsInFunction) {
 
     if(IsWrite) {
         WritePos = Loc;
@@ -208,10 +217,13 @@ GlobalRWAggregation::GlobalRWAggregation(DeclarationName Name,
 }
 
 void
-GlobalRWAggregation::addGlobalRW(SourceLocation Loc, bool IsWrite, int Index) {
+GlobalRWAggregation::addGlobalRW(SourceLocation Loc, bool IsWrite, int Index,
+                                 bool IsInFunction) {
     if(HasConflict || (!IsWrite && !HasWrite)) {
         return;
     }
+
+    IsAnyInFunction |= IsInFunction;
 
     if(HasWrite) {
         OtherPos = Loc;
@@ -232,7 +244,7 @@ GlobalRWAggregation::getDeclName() {
 
 bool
 GlobalRWAggregation::hasConflict() {
-    return HasConflict;
+    return HasConflict && IsAnyInFunction;
 }
 
 } // namespace clang::tidy::bugprone

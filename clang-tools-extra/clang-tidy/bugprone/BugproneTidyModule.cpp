@@ -105,7 +105,7 @@ public:
     CheckFactories.registerCheck<ArgumentCommentCheck>(
         "bugprone-argument-comment");
     CheckFactories.registerCheck<SideEffectsBetweenSequencePointsCheck>(
-        "bugprone-side-effect-between-seq-check");
+        "bugprone-conflicting-global-read-write");
     CheckFactories.registerCheck<AssertSideEffectCheck>(
         "bugprone-assert-side-effect");
     CheckFactories.registerCheck<AssignmentInIfConditionCheck>(

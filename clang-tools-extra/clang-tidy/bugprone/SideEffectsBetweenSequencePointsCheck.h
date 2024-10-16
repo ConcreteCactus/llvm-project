@@ -19,13 +19,16 @@ public:
         DeclarationName DeclName;
         SourceLocation WritePos, OtherPos;
         int IndexCreated;
-        bool HasWrite, HasConflict;
+        bool HasWrite, HasConflict, IsAnyInFunction;
     public:
+        GlobalRWAggregation();
         GlobalRWAggregation(DeclarationName Name,
                             SourceLocation  Loc,
                             bool            IsWrite,
-                            int             Index);
-        void addGlobalRW(SourceLocation Loc, bool IsWrite, int Index);
+                            int             Index,
+                            bool            IsInFunction);
+        void addGlobalRW(SourceLocation Loc, bool IsWrite, int Index,
+                         bool IsInFunction);
         DeclarationName getDeclName();
         bool hasConflict();
     };
@@ -44,6 +47,7 @@ public:
         std::vector<GlobalRWAggregation> GlobalsFound;
         std::vector<DeclarationName> FunctionsChecked;
         int TraversalIndex;
+        bool IsInsideAFunction;
         static bool isGlobalDecl(const VarDecl* D);
         static bool isGlobalExpr(const Expr*    E);
         void addGlobal(DeclarationName Name, SourceLocation Loc, bool IsWrite);
