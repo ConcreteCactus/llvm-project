@@ -9,6 +9,87 @@ using GlobalRWAggregation =
 using GlobalRWVisitor =
     SideEffectsBetweenSequencePointsCheck::GlobalRWVisitor;
 
+static bool isGlobalDecl(const VarDecl* VD) {
+    return 
+        VD &&
+        VD->hasGlobalStorage() && 
+        VD->getLocation().isValid() &&
+        !VD->getType().isConstQualified();
+}
+
+static bool isGlobalDeclRefExpr(const DeclRefExpr* DR) {
+    if(!isa<VarDecl>(DR->getDecl())) {
+        return false;
+    }
+    const auto* VD = dyn_cast<VarDecl>(DR->getDecl());
+    return isGlobalDecl(VD);
+}
+
+static void checkCallExpr(const CallExpr* CE, GlobalRWVisitor* Visitor) {
+    const Type* CT = CE->getCallee()->getType().getTypePtrOrNull();
+    if(const auto* PT = dyn_cast_if_present<PointerType>(CT)) {
+        CT = PT->getPointeeType().getTypePtrOrNull();
+    }
+    const auto* ProtoType = dyn_cast_if_present<FunctionProtoType>(CT);
+
+    for(uint32_t I = 0; I < CE->getNumArgs(); I++) {
+        const Expr* Arg = CE->getArg(I);
+        if(const auto* DR = dyn_cast<DeclRefExpr>(Arg)) {
+            if(!isGlobalDeclRefExpr(DR)) {
+                continue;
+            }
+
+            if(!ProtoType || I >= ProtoType->getNumParams()) {
+                Visitor->addGlobalManually(DR, /*isWrite*/false);
+                continue;
+            }
+
+            const Type* ParamType = ProtoType->getParamType(I)
+                                                .getTypePtrOrNull();
+            if(const auto* RT = dyn_cast_if_present<ReferenceType>(ParamType)) {
+                if(!RT->getPointeeType().isConstQualified()) {
+                    Visitor->addGlobalManually(DR, /*isWrite*/true);
+                }
+            }
+
+            Visitor->addGlobalManually(DR, /*isWrite*/false);
+            continue;
+        }
+
+        if(const auto* Op = dyn_cast<UnaryOperator>(Arg)) {
+            if(Op->getOpcode() != UO_AddrOf 
+            || !isa<DeclRefExpr>(Op->getSubExpr())) {
+                // Still do the traversal as we don't know what is in there.
+                Visitor->startTraversal(const_cast<Expr*>(Arg));
+                continue;
+            }
+            const auto* DR = dyn_cast<DeclRefExpr>(Op->getSubExpr());
+
+            if(!isGlobalDeclRefExpr(DR)) {
+                continue;
+            }
+
+            if(!ProtoType || I >= ProtoType->getNumParams()) {
+                Visitor->addGlobalManually(DR, /*isWrite*/false);
+                continue;
+            }
+
+            const Type* ParamType = ProtoType->getParamType(I)
+                                                .getTypePtrOrNull();
+            if(const auto* RT = dyn_cast_if_present<ReferenceType>(ParamType)) {
+                if(!RT->getPointeeType().isConstQualified()) {
+                    Visitor->addGlobalManually(DR, /*isWrite*/true);
+                }
+            }
+
+            Visitor->addGlobalManually(DR, /*isWrite*/false);
+            continue;
+        }
+
+        Visitor->startTraversal(const_cast<Expr*>(Arg));
+    }
+}
+
 AST_MATCHER(Expr, twoGlobalWritesBetweenSequencePoints) {
     const Expr* E = &Node;
     GlobalRWVisitor Visitor;
@@ -64,15 +145,7 @@ GlobalRWVisitor::startTraversal(Expr* E) {
     TraversalIndex++;
     IsInsideAFunction = false;
     FunctionsChecked.clear();
-    TraverseStmt(E);
-}
-
-bool
-GlobalRWVisitor::isGlobalDecl(const VarDecl* VD) {
-    return 
-        VD->hasGlobalStorage() && 
-        VD->getLocation().isValid() &&
-        !VD->getType().isConstQualified();
+    TraverseStmt(E); // soooo clean
 }
 
 bool
@@ -107,22 +180,6 @@ GlobalRWVisitor::VisitExpr(Expr* E) {
             Modified = Op->getLHS();
         } else {
             return true;
-        }
-    }
-
-    if(const auto *OpCallExpr = dyn_cast<CXXOperatorCallExpr>(E)) {
-        if(const auto* MethodDecl =
-            dyn_cast_or_null<CXXMethodDecl>(OpCallExpr->getDirectCallee())) {
-            if(MethodDecl->isConst()) {
-                return true;
-            }
-        }
-
-        OverloadedOperatorKind OpKind = OpCallExpr->getOperator();
-        if(OpCallExpr->isAssignmentOp() || OpKind == OO_PlusPlus 
-        || OpKind == OO_MinusMinus || OpKind == OO_LessLess
-        || OpKind == OO_GreaterGreater) {
-            Modified = OpCallExpr->getArg(0);
         }
     }
 
@@ -199,6 +256,13 @@ GlobalRWVisitor::addGlobal(DeclarationName Name, SourceLocation Loc,
 
     GlobalsFound.emplace_back(Name, Loc, IsWrite, TraversalIndex,
                               IsInsideAFunction);
+}
+
+void
+GlobalRWVisitor::addGlobal(const DeclRefExpr* DR, bool IsWrite) {
+    const auto* VD = dyn_cast<VarDecl>(DR->getDecl());
+    assert(VD); // Risky
+    addGlobal(VD->getDeclName(), DR->getBeginLoc(), IsWrite);
 }
 
 GlobalRWAggregation::GlobalRWAggregation(DeclarationName Name,

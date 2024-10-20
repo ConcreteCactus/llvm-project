@@ -35,22 +35,23 @@ public:
 
     class GlobalRWVisitor
         : public RecursiveASTVisitor<GlobalRWVisitor> {
+    friend RecursiveASTVisitor<GlobalRWVisitor>;
     public:
         void startTraversal(Expr* E);
         const std::vector<GlobalRWAggregation>& getGlobalsFound();
 
-        // overrides (please don't call these directly)
+    private:
+        // RecursiveASTVisitor overrides
         bool VisitDeclRefExpr(DeclRefExpr* S);
         bool VisitExpr(Expr* E);
         bool TraverseStmt(Stmt* S, DataRecursionQueue* Queue = nullptr);
-    private:
+
         std::vector<GlobalRWAggregation> GlobalsFound;
         std::vector<DeclarationName> FunctionsChecked;
         int TraversalIndex;
         bool IsInsideAFunction;
-        static bool isGlobalDecl(const VarDecl* D);
-        static bool isGlobalExpr(const Expr*    E);
         void addGlobal(DeclarationName Name, SourceLocation Loc, bool IsWrite);
+        void addGlobal(const DeclRefExpr* DR, bool IsWrite);
     };
 
 private:

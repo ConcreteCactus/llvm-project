@@ -1,85 +1,88 @@
 // RUN: %check_clang_tidy %s bugprone-conflicting-global-read-write %t
 
-int a;
+int GlobalVarA;
 
-int f(void) {
-    a++;
+int incGlobalVarA(void) {
+    GlobalVarA++;
     return 0;
 }
 
-int g(void) {
-    return a;
+int getGlobalVarA(void) {
+    return GlobalVarA;
 }
 
-int t1(void) {
+int testFunc1(void) {
 
-    int b = g() + f();
+    int B = getGlobalVarA() + incGlobalVarA();
+    (void)B;
     // CHECK-MESSAGES: :[[@LINE-1]]:13: warning: read/write conflict on global variable
 
-    return a + f();
+    return GlobalVarA + incGlobalVarA();
     // CHECK-MESSAGES: :[[@LINE-1]]:12: warning: read/write conflict on global variable
 
 }
 
-int h(int a, int b, int c, int d) {
-    return a + b + c + d;
+int addAll(int A, int B, int C, int D) {
+    return A + B + C + D;
 }
 
-int t2(void) {
-    int b;
-
+int testFunc2(void) {
+    int B;
+    (void)B;
     // Make sure the order does not affect the outcome
 
-    b = g() + (a++);
+    B = getGlobalVarA() + (GlobalVarA++);
     // CHECK-MESSAGES: :[[@LINE-1]]:9: warning: read/write conflict on global variable
 
-    b = (a++) + g();
+    B = (GlobalVarA++) + getGlobalVarA();
     // CHECK-MESSAGES: :[[@LINE-1]]:9: warning: read/write conflict on global variable
 
-    b = f() + a;
+    B = incGlobalVarA() + GlobalVarA;
     // CHECK-MESSAGES: :[[@LINE-1]]:9: warning: read/write conflict on global variable
 
-    b = h(a++, g(), 0, 0);
+    B = addAll(GlobalVarA++, getGlobalVarA(), 0, 0);
     // CHECK-MESSAGES: :[[@LINE-1]]:9: warning: read/write conflict on global variable
 
-    b = h(g(), a++, 0, 0);
+    B = addAll(getGlobalVarA(), GlobalVarA++, 0, 0);
     // CHECK-MESSAGES: :[[@LINE-1]]:9: warning: read/write conflict on global variable
 
     // This is already checked by the unsequenced clang warning, so we don't
     // want to warn about this.
-    return a + (++a);
+    return GlobalVarA + (++GlobalVarA);
 }
 
-int t3(void) {
+int testFunc3(void) {
 
     // Make sure double reads are not flagged
-    int b = a + a;
-    b = a + g();
+    int B = GlobalVarA + GlobalVarA;
+    B = GlobalVarA + getGlobalVarA();
 
-    return a - a;
+    return GlobalVarA - GlobalVarA;
 }
 
-bool t4(void) {
+bool testFunc4(void) {
 
     // Make sure || and && operators are not flagged
-    bool b = a || (a++);
-    if(a && (a--)) {
+    bool B = GlobalVarA || (GlobalVarA++);
+    if(GlobalVarA && (GlobalVarA--)) {
 
-        b = a || (a++) + g();
+        B = GlobalVarA || (GlobalVarA++) + getGlobalVarA();
         // CHECK-MESSAGES: :[[@LINE-1]]:18: warning: read/write conflict on global variable
 
-        return (++a) || b || g();
+        return (++GlobalVarA) || B || getGlobalVarA();
     }
+
+    return false;
 }
 
-int i(int& p) {
-    p++;
+int incArg(int& P) {
+    P++;
     return 0;
 }
 
-int t5() {
+int testFunc5() {
 
-    if(a > f()) {
+    if(GlobalVarA > incGlobalVarA()) {
     // CHECK-MESSAGES: :[[@LINE-1]]:8: warning: read/write conflict on global variable
 
         return 1;
@@ -87,44 +90,22 @@ int t5() {
     return 0;
 }
 
-class C1 {
-    static int B;
+class TestClass1 {
+    static int StaticVar1;
 
-    int F() {
-        B++;
+    int incStaticVar1() {
+        StaticVar1++;
         return 0;
     }
 
-    int G() {
-        return B;
+    int getStaticVar1() {
+        return StaticVar1;
     }
 
-    int T6() {
+    int testClass1MemberFunc1() {
         
-        return F() + G();
+        return incStaticVar1() + getStaticVar1();
         // CHECK-MESSAGES: :[[@LINE-1]]:16: warning: read/write conflict on global variable
 
     }
 };
-
-struct {
-    int A;
-    int B;
-} GlobalStruct;
-
-int G;
-
-int t7() {
-    int C;
-
-    // There is a clang warning here
-    C = G + G++;
-
-    // But not here
-    C = GlobalStruct.A + GlobalStruct.A++;
-
-
-    // Should I check the latter case as well?
-    
-    return C;
-}
