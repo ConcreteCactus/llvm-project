@@ -10,8 +10,7 @@ namespace clang::tidy::bugprone {
 
 class ConflictingGlobalAccesses : public ClangTidyCheck {
 public:
-    ConflictingGlobalAccesses(StringRef Name,
-                                          ClangTidyContext* Context);
+    ConflictingGlobalAccesses(StringRef Name, ClangTidyContext* Context);
     void registerMatchers(ast_matchers::MatchFinder *Finder) override;
     void check(const ast_matchers::MatchFinder::MatchResult &Result) override;
 
@@ -134,6 +133,7 @@ public:
         std::vector<std::pair<DeclarationName, Stmt*>> FunctionsChecked;
         int TraversalIndex;
         bool IsInFunction;
+
         void addGlobal(DeclarationName Name, SourceLocation Loc, bool IsWrite,
                        bool IsUnchecked);
         void addGlobal(const DeclRefExpr* DR, bool IsWrite, bool IsUnchecked);

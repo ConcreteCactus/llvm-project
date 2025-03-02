@@ -59,7 +59,7 @@ int testFunc2(void) {
 int testFunc3(void) {
 
     // Make sure double reads are not flagged
-    int B = GlobalVarA + GlobalVarA;
+    int B = GlobalVarA + GlobalVarA; (void)B;
     B = GlobalVarA + getGlobalVarA();
 
     return GlobalVarA - GlobalVarA;
@@ -92,6 +92,8 @@ int incArgPtr(int* P) {
 
 int testFunc5() {
 
+    // Also check if statements
+
     if(GlobalVarA > incGlobalVarA()) {
     // CHECK-MESSAGES: :[[@LINE-1]]:8: warning: read/write conflict on global variable
 
@@ -118,6 +120,24 @@ int testFunc5() {
 
 int testFunc6() {
 
+    // Shouldn't warn here as the write takes place after the expression is
+    // evaluated.
+    GlobalVarA = GlobalVarA + 1;
+    GlobalVarA = incGlobalVarA();
+
+    // Also check the assignment expression, array element assignment, and
+    // pointer dereference lvalues.
+    int A = (GlobalVarA = 1) + incGlobalVarA(); (void)A;
+    // CHECK-MESSAGES: :[[@LINE-1]]:13: warning: read/write conflict on global variable
+    
+    int Array[] = {1, 2, 3};
+    Array[GlobalVarA] = incGlobalVarA();
+    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: read/write conflict on global variable
+    
+    *(Array + GlobalVarA) = incGlobalVarA();
+    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: read/write conflict on global variable
+    
+    // Shouldn't warn here as the clang warning takes care of it.
     return addAll(GlobalVarA, getGlobalVarA(), GlobalVarA++, 0);
 }
 
@@ -199,6 +219,9 @@ struct QuiteComplexStruct {
 
 
 void testFunc8() {
+
+    // Check if unions and structs are handled properly
+
     addAll(GlobalStruct.VarA, GlobalStruct.VarB++, 0, 0);
     addAll(GlobalStruct.StructA.VarD, GlobalStruct.VarA++, 0, 0);
     addAll(GlobalStruct.StructA.VarC, GlobalStruct.StructA.VarD++, GlobalStruct.VarB++, GlobalStruct.VarA++);

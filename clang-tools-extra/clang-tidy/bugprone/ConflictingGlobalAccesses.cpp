@@ -26,7 +26,9 @@ static bool isGlobalDecl(const VarDecl* VD) {
         !VD->getType().isConstQualified();
 }
 
-AST_MATCHER(Expr, twoGlobalWritesBetweenSequencePoints) {
+AST_MATCHER_P(Expr, twoGlobalWritesBetweenSequencePoints,
+              const LangStandard*, LangStd) {
+
     const Expr* E = &Node;
     GlobalRWVisitor Visitor;
 
@@ -35,6 +37,17 @@ AST_MATCHER(Expr, twoGlobalWritesBetweenSequencePoints) {
         if(Code == BO_LAnd || Code == BO_LOr || Code == BO_Comma) {
             return false;
         }
+
+        if(Op->isAssignmentOp() && isa<DeclRefExpr>(Op->getLHS())) {
+            return false;
+        }
+
+        if(LangStd->isCPlusPlus17() && (Code == BO_Shl || Code == BO_Shr ||
+                                        Code == BO_PtrMemD || 
+                                        Code == BO_PtrMemI)) {
+            return false;
+        }
+
         Visitor.startTraversal(Op->getLHS());
         Visitor.startTraversal(Op->getRHS());
     }
@@ -46,7 +59,8 @@ AST_MATCHER(Expr, twoGlobalWritesBetweenSequencePoints) {
     }
 
     const std::vector<TraversalAggregation>& Globals =
-                                                      Visitor.getGlobalsFound();
+                                                Visitor.getGlobalsFound();
+
     for(uint32_t I = 0; I < Globals.size(); I++) {
         if(Globals[I].shouldBeReported()) {
             return true;
@@ -65,14 +79,22 @@ AST_MATCHER(Expr, twoGlobalWritesBetweenSequencePoints) {
 ConflictingGlobalAccesses::ConflictingGlobalAccesses(
         StringRef Name,
         ClangTidyContext* Context)
-    : ClangTidyCheck(Name, Context) {}
+    : ClangTidyCheck(Name, Context) {
+}
 
 void
 ConflictingGlobalAccesses::registerMatchers(
         MatchFinder* Finder) {
+
+    const LangStandard* LangStd = 
+        &LangStandard::getLangStandardForKind(getLangOpts().LangStd);
+
+    ast_matchers::internal::Matcher<Expr> GlobalAccessMatcher = 
+        twoGlobalWritesBetweenSequencePoints(LangStd);
+
     Finder->addMatcher(
-            stmt(traverse(TK_AsIs, expr(twoGlobalWritesBetweenSequencePoints())
-                    .bind("gw"))), this);
+            stmt(traverse(TK_AsIs, expr(GlobalAccessMatcher).bind("gw"))),
+            this);
 }
 
 void
