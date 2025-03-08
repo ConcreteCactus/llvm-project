@@ -1,4 +1,5 @@
-// RUN: %check_clang_tidy %s bugprone-conflicting-global-accesses %t
+// RUN: %check_clang_tidy -std=c++11 -check-suffixes=,CPP11 %s bugprone-conflicting-global-accesses %t
+// RUN: %check_clang_tidy -std=c++17 %s bugprone-conflicting-global-accesses %t
 
 int GlobalVarA;
 
@@ -77,6 +78,9 @@ bool testFunc4(void) {
         return (++GlobalVarA) || B || getGlobalVarA();
     }
 
+    int C = GlobalVarA << incGlobalVarA(); (void)C;
+    // CHECK-MESSAGES-CPP11: :[[@LINE-1]]:13: warning: read/write conflict on global variable
+
     return false;
 }
 
@@ -132,10 +136,10 @@ int testFunc6() {
     
     int Array[] = {1, 2, 3};
     Array[GlobalVarA] = incGlobalVarA();
-    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: read/write conflict on global variable
+    // CHECK-MESSAGES-CPP11: :[[@LINE-1]]:5: warning: read/write conflict on global variable
     
     *(Array + GlobalVarA) = incGlobalVarA();
-    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: read/write conflict on global variable
+    // CHECK-MESSAGES-CPP11: :[[@LINE-1]]:5: warning: read/write conflict on global variable
     
     // Shouldn't warn here as the clang warning takes care of it.
     return addAll(GlobalVarA, getGlobalVarA(), GlobalVarA++, 0);
@@ -238,7 +242,6 @@ void testFunc8() {
     addAll((GlobalStruct.StructA = {}, 1), (GlobalStruct.VarA++, 0), GlobalStruct.StructA.VarD, 0);
     // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: read/write conflict on global variable
     
-
     addAll(ComplexGlobalStruct.UnionA.VarD, ComplexGlobalStruct.UnionA.StructA.VarC++, 0, 0);
     // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: read/write conflict on global variable
     addAll(ComplexGlobalStruct.UnionA.StructA.VarB, (ComplexGlobalStruct.UnionA.StructA = {}, 0), 0, 0);

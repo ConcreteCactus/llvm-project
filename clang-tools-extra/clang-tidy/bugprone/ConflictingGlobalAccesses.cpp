@@ -1,17 +1,196 @@
+//===----------------------------------------------------------------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
 #include "ConflictingGlobalAccesses.h"
 
 using namespace clang::ast_matchers;
 
 namespace clang::tidy::bugprone {
 
-using TraversalAggregation = ConflictingGlobalAccesses::TraversalAggregation;
-using GlobalRWVisitor = ConflictingGlobalAccesses::GlobalRWVisitor;
-using TraversalResultKind = ConflictingGlobalAccesses::TraversalResultKind;
-using TraversalResult = ConflictingGlobalAccesses::TraversalResult;
-using ObjectAccessTree = ConflictingGlobalAccesses::ObjectAccessTree;
-using FieldMap = ObjectAccessTree::FieldMap;
-using ObjectTraversalAggregation =
-    ConflictingGlobalAccesses::ObjectTraversalAggregation;
+namespace {
+// An AccesKind represents one access to a global variable.
+//
+// The unchecked versions represent reads/writes that are not handled by
+// -Wunsequenced. (e.g. accesses inside functions).
+using AccessKind = uint8_t;
+static constexpr AccessKind AkRead = 0;
+static constexpr AccessKind AkWrite = 1;
+static constexpr AccessKind AkUncheckedRead = 2;
+static constexpr AccessKind AkUncheckedWrite = 3;
+
+static constexpr uint8_t AkCount = 4;
+
+// The TraversalResultKind represents a set of accesses.
+// Bits are corresponding to the AccessKind enum values.
+using TraversalResultKind = uint8_t;
+static constexpr TraversalResultKind TrInvalid = 0;
+static constexpr TraversalResultKind TrRead = 1 << AkRead;
+static constexpr TraversalResultKind TrWrite = 1 << AkWrite;
+static constexpr TraversalResultKind TrUncheckedWrite = 1 << AkUncheckedWrite;
+
+// To represent fields in structs or unions we use numbered FieldIndices. The
+// FieldIndexArray represents one field inside a global struct/union system.
+// The FieldIndexArray can be thought of as a path inside a tree.
+using FieldIndex = uint16_t;
+static constexpr FieldIndex FiUnion = 0x8000;
+
+// Note: This bit signals whether the field is a *field of* a struct or a
+// union, not whether the type of the field itself is a struct or a union.
+using FieldIndexArray = SmallVector<FieldIndex>;
+
+/// One traversal recurses into one side of a binary expression or one
+/// parameter of a function call. At least two of these traversals are used to
+/// find conflicting accesses.
+///
+/// A TraversalResult represents one traversal.
+struct TraversalResult {
+  int IndexCreated; // We use indices to keep track of which
+                    // traversal we are in currently. The current
+                    // index is stored in GlobalRWVisitor with the
+                    // name TraversalIndex.
+  SourceLocation Loc[AkCount];
+  TraversalResultKind Kind;
+
+  TraversalResult();
+  TraversalResult(int Index, SourceLocation Loc, AccessKind Access);
+  void addNewAccess(SourceLocation Loc, AccessKind Access);
+};
+
+/// The result of a number of traversals.
+class TraversalAggregation {
+  DeclarationName DeclName; // The name of the global variable being checked.
+
+  // We only store the result of two traversals as two conflicting accesses
+  // are enough to detect undefined behavior. The two stored TraversalResults
+  // have different traversal indices.
+  //
+  // Note: Sometimes multiple traversals are merged into one
+  // TraversalResult.
+  TraversalResult MainPart, OtherPart;
+  // Pairings that are not reportable: Read-Read, Read-Write,
+  // Read-UncheckedRead, Write-Write, UncheckedRead-UncheckedRead.
+
+public:
+  TraversalAggregation();
+  TraversalAggregation(DeclarationName Name, SourceLocation Loc,
+                       AccessKind Access, int Index);
+  void addGlobalRW(SourceLocation Loc, AccessKind Access, int Index);
+  DeclarationName getDeclName() const;
+
+  bool isValid() const;
+
+  // If there is a conflict and that conflict isn't reported by -Wunsequenced
+  // then we report the conflict.
+  bool shouldBeReported() const;
+  bool hasConflictingOperations() const;
+
+private:
+  bool hasTwoAccesses() const;
+  bool isReportedByWunsequenced() const;
+};
+
+/// The ObjectAccessTree stores the TraversalAggregations of one global
+/// struct/union. Because each field can be handled as a single variable, the
+/// tree stores one TraversalAggregation for every field.
+///
+/// Note: structs, classes, and unions are called objects in the code.
+struct ObjectAccessTree {
+  using FieldMap = std::map<int, std::unique_ptr<ObjectAccessTree>>;
+  TraversalAggregation OwnAccesses;
+
+  // In a union, new fields should inherit from UnionTemporalAccesses
+  // instead of OwnAccesses. That's because an access to a field of a union is
+  // also an access to every other field of the same union.
+  TraversalAggregation UnionTemporalAccesses;
+
+  // We try to be lazy and only store fields that are actually accessed.
+  FieldMap Fields;
+  bool IsUnion;
+
+  ObjectAccessTree(TraversalAggregation Own);
+  void addFieldToAll(SourceLocation Loc, AccessKind Access, int Index);
+  void addFieldToAllExcept(uint16_t ExceptIndex, SourceLocation Loc,
+                           AccessKind Access, int Index);
+};
+
+/// This object is the root of all ObjectAccessTrees.
+class ObjectTraversalAggregation {
+  DeclarationName DeclName; // The name of the global struct/union.
+  ObjectAccessTree AccessTree;
+
+public:
+  ObjectTraversalAggregation(DeclarationName Name, SourceLocation Loc,
+                             FieldIndexArray FieldIndices, AccessKind Access,
+                             int Index);
+  void addFieldRW(SourceLocation Loc, FieldIndexArray FieldIndices,
+                  AccessKind Access, int Index);
+  DeclarationName getDeclName() const;
+  bool shouldBeReported() const;
+
+private:
+  bool shouldBeReportedRec(const ObjectAccessTree *Node) const;
+};
+
+/// GlobalRWVisitor (global read write visitor) does all the traversals.
+class GlobalRWVisitor : public RecursiveASTVisitor<GlobalRWVisitor> {
+  friend RecursiveASTVisitor<GlobalRWVisitor>;
+
+public:
+  GlobalRWVisitor();
+
+  // startTraversal is called to start a new traversal. It increments the
+  // TraversalIndex, which in turn will generate new TraversalResults.
+  void startTraversal(Expr *E);
+
+  const std::vector<TraversalAggregation> &getGlobalsFound() const;
+
+  const std::vector<ObjectTraversalAggregation> &getObjectGlobalsFound() const;
+
+protected:
+  // RecursiveASTVisitor overrides
+  bool VisitDeclRefExpr(DeclRefExpr *S);
+  bool VisitUnaryOperator(UnaryOperator *Op);
+  bool VisitBinaryOperator(BinaryOperator *Op);
+  bool VisitCallExpr(CallExpr *CE);
+  bool VisitMemberExpr(MemberExpr *ME);
+
+private:
+  void visitCallExprArgs(CallExpr *CE);
+  void traverseFunctionsToBeChecked();
+
+  std::vector<TraversalAggregation> GlobalsFound;
+  std::vector<ObjectTraversalAggregation> ObjectGlobalsFound;
+
+  // We check inside functions only if the functions hasn't been checked in
+  // the current traversal. We use this array to check if the function is
+  // already registered to be checked.
+  std::vector<std::pair<DeclarationName, Stmt *>> FunctionsToBeChecked;
+
+  // The TraversalIndex is used to differentiate between two sides of a binary
+  // expression or the parameters of a function. Every traversal represents
+  // one such expression and the TraversalIndex is incremented between them.
+  int TraversalIndex;
+
+  // Accesses that are inside functions are not checked by -Wunsequenced,
+  // therefore we keep track of whether we are inside of a function or not.
+  bool IsInFunction;
+
+  void addGlobal(DeclarationName Name, SourceLocation Loc, bool IsWrite,
+                 bool IsUnchecked);
+  void addGlobal(const DeclRefExpr *DR, bool IsWrite, bool IsUnchecked);
+  void addField(DeclarationName Name, FieldIndexArray FieldIndices,
+                SourceLocation Loc, bool IsWrite, bool IsUnchecked);
+  bool handleModified(const Expr *Modified, bool IsUnchecked);
+  bool handleModifiedVariable(const DeclRefExpr *DE, bool IsUnchecked);
+  bool handleAccessedObject(const Expr *E, bool IsWrite, bool IsUnchecked);
+  bool isVariable(const Expr *E);
+};
+} // namespace
 
 static bool isGlobalDecl(const VarDecl *VD) {
   return VD && VD->hasGlobalStorage() && VD->getLocation().isValid() &&
@@ -36,7 +215,7 @@ AST_MATCHER_P(Expr, twoGlobalWritesBetweenSequencePoints, const LangStandard *,
 
     if (LangStd->isCPlusPlus17() &&
         (Code == BO_Shl || Code == BO_Shr || Code == BO_PtrMemD ||
-         Code == BO_PtrMemI)) {
+         Code == BO_PtrMemI || Op->isAssignmentOp())) {
       return false;
     }
 
@@ -96,17 +275,22 @@ GlobalRWVisitor::GlobalRWVisitor() : TraversalIndex(0), IsInFunction(false) {}
 
 void GlobalRWVisitor::startTraversal(Expr *E) {
   TraversalIndex++;
-  FunctionsChecked.clear();
+  FunctionsToBeChecked.clear();
   IsInFunction = false;
   TraverseStmt(E);
+
+  // We keep a list of functions to be checked during traversal so that they are
+  // not checked multiple times.
   traverseFunctionsToBeChecked();
 }
 
 void GlobalRWVisitor::traverseFunctionsToBeChecked() {
   IsInFunction = true;
-  // Expect FunctionsChecked to grow while walking.
-  for (uint32_t I = 0; I < FunctionsChecked.size(); I++) {
-    TraverseStmt(FunctionsChecked[I].second);
+
+  // We could find more functions to be checked while checking functions.
+  // Because a simple iterator could get invalidated, we index into the array.
+  for (size_t I = 0; I < FunctionsToBeChecked.size(); ++I) {
+    TraverseStmt(FunctionsToBeChecked[I].second);
   }
 }
 
@@ -290,12 +474,12 @@ bool GlobalRWVisitor::VisitCallExpr(CallExpr *CE) {
     return true;
   }
 
-  for (uint32_t I = 0; I < FunctionsChecked.size(); I++) {
-    if (FunctionsChecked[I].first == FD->getDeclName()) {
+  for (const std::pair<DeclarationName, Stmt *> &Fun : FunctionsToBeChecked) {
+    if (Fun.first == FD->getDeclName()) {
       return true;
     }
   }
-  FunctionsChecked.emplace_back(FD->getDeclName(), FD->getBody());
+  FunctionsToBeChecked.emplace_back(FD->getDeclName(), FD->getBody());
 
   return true;
 }
@@ -325,13 +509,6 @@ void GlobalRWVisitor::addGlobal(DeclarationName Name, SourceLocation Loc,
   GlobalsFound.emplace_back(Name, Loc, Access, TraversalIndex);
 }
 
-void GlobalRWVisitor::addGlobal(const DeclRefExpr *DR, bool IsWrite,
-                                bool IsUnchecked) {
-  const auto *VD = dyn_cast<VarDecl>(DR->getDecl());
-  assert(VD); // Risky
-  addGlobal(VD->getDeclName(), DR->getBeginLoc(), IsWrite, IsUnchecked);
-}
-
 void GlobalRWVisitor::addField(DeclarationName Name,
                                FieldIndexArray FieldIndices, SourceLocation Loc,
                                bool IsWrite, bool IsUnchecked) {
@@ -349,9 +526,7 @@ void GlobalRWVisitor::addField(DeclarationName Name,
                                   TraversalIndex);
 }
 
-TraversalResultKind ConflictingGlobalAccesses::akToTr(AccessKind Ak) {
-  return 1 << Ak;
-}
+static TraversalResultKind akToTr(AccessKind Ak) { return 1 << Ak; }
 
 TraversalAggregation::TraversalAggregation() {}
 
@@ -462,7 +637,9 @@ void ObjectTraversalAggregation::addFieldRW(SourceLocation Loc,
     uint16_t FieldKey = FieldIndices[I] & ~FiUnion;
 
     ObjectAccessTree *PrevNode = CurrentNode;
-    FieldMap::iterator It = CurrentNode->Fields.find(FieldKey);
+    ObjectAccessTree::FieldMap::iterator It =
+        CurrentNode->Fields.find(FieldKey);
+
     if (It == CurrentNode->Fields.end()) {
       CurrentNode =
           new ObjectAccessTree(IsUnion ? CurrentNode->UnionTemporalAccesses
@@ -495,7 +672,7 @@ bool ObjectTraversalAggregation::shouldBeReportedRec(
   if (Node->OwnAccesses.hasConflictingOperations()) {
     return true;
   }
-  FieldMap::const_iterator FieldIt = Node->Fields.begin();
+  ObjectAccessTree::FieldMap::const_iterator FieldIt = Node->Fields.begin();
   for (; FieldIt != Node->Fields.end(); FieldIt++) {
     if (shouldBeReportedRec(FieldIt->second.get())) {
       return true;
