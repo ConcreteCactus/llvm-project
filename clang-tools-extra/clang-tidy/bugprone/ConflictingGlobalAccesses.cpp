@@ -199,9 +199,9 @@ static bool isGlobalDecl(const VarDecl *VD) {
 
 AST_MATCHER_P(Expr, twoGlobalWritesBetweenSequencePoints, const LangStandard *,
               LangStd) {
+  assert(LangStd);
 
   const Expr *E = &Node;
-  GlobalRWVisitor Visitor;
 
   if (const BinaryOperator *Op = dyn_cast<BinaryOperator>(E)) {
     const BinaryOperator::Opcode Code = Op->getOpcode();
@@ -219,30 +219,13 @@ AST_MATCHER_P(Expr, twoGlobalWritesBetweenSequencePoints, const LangStandard *,
       return false;
     }
 
-    Visitor.startTraversal(Op->getLHS());
-    Visitor.startTraversal(Op->getRHS());
+    return true;
   }
 
-  if (const CallExpr *CE = dyn_cast<CallExpr>(E)) {
-    for (uint32_t I = 0; I < CE->getNumArgs(); I++) {
-      Visitor.startTraversal(const_cast<Expr *>(CE->getArg(I)));
-    }
+  if (isa<CallExpr>(E)) {
+    return true;
   }
 
-  const std::vector<TraversalAggregation> &Globals = Visitor.getGlobalsFound();
-
-  for (uint32_t I = 0; I < Globals.size(); I++) {
-    if (Globals[I].shouldBeReported()) {
-      return true;
-    }
-  }
-  const std::vector<ObjectTraversalAggregation> &ObjectGlobals =
-      Visitor.getObjectGlobalsFound();
-  for (uint32_t I = 0; I < ObjectGlobals.size(); I++) {
-    if (ObjectGlobals[I].shouldBeReported()) {
-      return true;
-    }
-  }
   return false;
 }
 
@@ -264,10 +247,35 @@ void ConflictingGlobalAccesses::registerMatchers(MatchFinder *Finder) {
 
 void ConflictingGlobalAccesses::check(const MatchFinder::MatchResult &Result) {
   const Expr *E = Result.Nodes.getNodeAs<Expr>("gw");
-  if (E && E->getBeginLoc().isValid()) {
-    diag(E->getBeginLoc(), "read/write conflict on global variable");
-  } else {
-    diag("read/write conflict on global variable");
+  assert(E);
+
+  GlobalRWVisitor Visitor;
+  if (const auto *Op = dyn_cast<BinaryOperator>(E)) {
+    Visitor.startTraversal(Op->getLHS());
+    Visitor.startTraversal(Op->getRHS());
+
+  } else if (const auto *CE = dyn_cast<CallExpr>(E)) {
+    for (uint32_t I = 0; I < CE->getNumArgs(); I++) {
+      Visitor.startTraversal(const_cast<Expr *>(CE->getArg(I)));
+    }
+  }
+
+  const std::vector<TraversalAggregation> &Globals = Visitor.getGlobalsFound();
+
+  for (uint32_t I = 0; I < Globals.size(); I++) {
+    if (Globals[I].shouldBeReported()) {
+      diag(E->getBeginLoc(), "read/write conflict on global variable " +
+                                 Globals[I].getDeclName().getAsString());
+    }
+  }
+  const std::vector<ObjectTraversalAggregation> &ObjectGlobals =
+      Visitor.getObjectGlobalsFound();
+  for (uint32_t I = 0; I < ObjectGlobals.size(); I++) {
+    if (ObjectGlobals[I].shouldBeReported()) {
+      diag(E->getBeginLoc(), "read/write conflict on the field of the global "
+                             "object " +
+                                 ObjectGlobals[I].getDeclName().getAsString());
+    }
   }
 }
 
