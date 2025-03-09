@@ -12,7 +12,6 @@ POINTSCHECK_H
 POINTSCHECK_H
 
 #include "../ClangTidyCheck.h"
-#include "clang/AST/RecursiveASTVisitor.h"
 
 namespace clang::tidy::bugprone {
 

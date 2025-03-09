@@ -8,6 +8,8 @@
 
 #include "ConflictingGlobalAccesses.h"
 
+#include "clang/AST/RecursiveASTVisitor.h"
+
 using namespace clang::ast_matchers;
 
 namespace clang::tidy::bugprone {
@@ -113,6 +115,10 @@ struct ObjectAccessTree {
   bool IsUnion;
 
   ObjectAccessTree(TraversalAggregation Own);
+  ObjectAccessTree(ObjectAccessTree& Other) = delete;
+  ObjectAccessTree(const ObjectAccessTree& Other) = delete;
+  ObjectAccessTree(ObjectAccessTree&& Other) = default;
+
   void addFieldToAll(SourceLocation Loc, AccessKind Access, int Index);
   void addFieldToAllExcept(uint16_t ExceptIndex, SourceLocation Loc,
                            AccessKind Access, int Index);
@@ -700,7 +706,7 @@ void ObjectAccessTree::addFieldToAll(SourceLocation Loc, AccessKind Access,
                                      int Index) {
   OwnAccesses.addGlobalRW(Loc, Access, Index);
   UnionTemporalAccesses.addGlobalRW(Loc, Access, Index);
-  FieldMap::const_iterator FieldIt = Fields.begin();
+  FieldMap::iterator FieldIt = Fields.begin();
   for (; FieldIt != Fields.end(); FieldIt++) {
     FieldIt->second->addFieldToAll(Loc, Access, Index);
   }
