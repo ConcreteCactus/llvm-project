@@ -102,7 +102,7 @@ private:
 ///
 /// Note: structs, classes, and unions are called objects in the code.
 struct ObjectAccessTree {
-  using FieldMap = std::map<int, std::unique_ptr<ObjectAccessTree>>;
+  using FieldMap = llvm::DenseMap<int, std::unique_ptr<ObjectAccessTree>>;
   TraversalAggregation OwnAccesses;
 
   // In a union, new fields should inherit from UnionTemporalAccesses
@@ -115,9 +115,6 @@ struct ObjectAccessTree {
   bool IsUnion;
 
   ObjectAccessTree(TraversalAggregation Own);
-  ObjectAccessTree(ObjectAccessTree& Other) = delete;
-  ObjectAccessTree(const ObjectAccessTree& Other) = delete;
-  ObjectAccessTree(ObjectAccessTree&& Other) = default;
 
   void addFieldToAll(SourceLocation Loc, AccessKind Access, int Index);
   void addFieldToAllExcept(uint16_t ExceptIndex, SourceLocation Loc,
@@ -147,15 +144,16 @@ class GlobalRWVisitor : public RecursiveASTVisitor<GlobalRWVisitor> {
   friend RecursiveASTVisitor<GlobalRWVisitor>;
 
 public:
-  GlobalRWVisitor();
+  GlobalRWVisitor(bool IsWritePossibleThroughFunctionParam);
 
   // startTraversal is called to start a new traversal. It increments the
   // TraversalIndex, which in turn will generate new TraversalResults.
   void startTraversal(Expr *E);
 
-  const std::vector<TraversalAggregation> &getGlobalsFound() const;
+  const llvm::SmallVector<TraversalAggregation> &getGlobalsFound() const;
 
-  const std::vector<ObjectTraversalAggregation> &getObjectGlobalsFound() const;
+  const llvm::SmallVector<ObjectTraversalAggregation>
+      &getObjectGlobalsFound() const;
 
 protected:
   // RecursiveASTVisitor overrides
@@ -169,13 +167,13 @@ private:
   void visitCallExprArgs(CallExpr *CE);
   void traverseFunctionsToBeChecked();
 
-  std::vector<TraversalAggregation> GlobalsFound;
-  std::vector<ObjectTraversalAggregation> ObjectGlobalsFound;
+  llvm::SmallVector<TraversalAggregation> GlobalsFound;
+  llvm::SmallVector<ObjectTraversalAggregation> ObjectGlobalsFound;
 
   // We check inside functions only if the functions hasn't been checked in
   // the current traversal. We use this array to check if the function is
   // already registered to be checked.
-  std::vector<std::pair<DeclarationName, Stmt *>> FunctionsToBeChecked;
+  llvm::SmallVector<std::pair<DeclarationName, Stmt *>> FunctionsToBeChecked;
 
   // The TraversalIndex is used to differentiate between two sides of a binary
   // expression or the parameters of a function. Every traversal represents
@@ -266,7 +264,8 @@ void ConflictingGlobalAccesses::check(const MatchFinder::MatchResult &Result) {
     }
   }
 
-  const std::vector<TraversalAggregation> &Globals = Visitor.getGlobalsFound();
+  const llvm::SmallVector<TraversalAggregation> &Globals =
+      Visitor.getGlobalsFound();
 
   for (uint32_t I = 0; I < Globals.size(); I++) {
     if (Globals[I].shouldBeReported()) {
@@ -274,7 +273,7 @@ void ConflictingGlobalAccesses::check(const MatchFinder::MatchResult &Result) {
                                  Globals[I].getDeclName().getAsString());
     }
   }
-  const std::vector<ObjectTraversalAggregation> &ObjectGlobals =
+  const llvm::SmallVector<ObjectTraversalAggregation> &ObjectGlobals =
       Visitor.getObjectGlobalsFound();
   for (uint32_t I = 0; I < ObjectGlobals.size(); I++) {
     if (ObjectGlobals[I].shouldBeReported()) {
@@ -498,12 +497,12 @@ bool GlobalRWVisitor::VisitCallExpr(CallExpr *CE) {
   return true;
 }
 
-const std::vector<TraversalAggregation> &
+const llvm::SmallVector<TraversalAggregation> &
 GlobalRWVisitor::getGlobalsFound() const {
   return GlobalsFound;
 }
 
-const std::vector<ObjectTraversalAggregation> &
+const llvm::SmallVector<ObjectTraversalAggregation> &
 GlobalRWVisitor::getObjectGlobalsFound() const {
   return ObjectGlobalsFound;
 }
