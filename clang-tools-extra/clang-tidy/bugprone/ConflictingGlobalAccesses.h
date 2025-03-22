@@ -49,11 +49,27 @@ namespace clang::tidy::bugprone {
 /// functions that are inside the same translation unit. It also attempts not to
 /// flag cases that are already covered by -Wunsequenced. Global unions and
 /// structs are also handled.
+///
+/// It's possible to enable handling mutable reference and pointer function
+/// parameters as writes using the HandleMutableFunctionParametersAsWrites
+/// option. For example: \code
+///
+/// void func(int& a);
+///
+/// int globalVar;
+/// func(globalVar); // <- this could be a write to globalVar.
+///
+/// \endcode
+///
+/// This option is disabled by default.
 class ConflictingGlobalAccesses : public ClangTidyCheck {
 public:
   ConflictingGlobalAccesses(StringRef Name, ClangTidyContext *Context);
   void registerMatchers(ast_matchers::MatchFinder *Finder) override;
   void check(const ast_matchers::MatchFinder::MatchResult &Result) override;
+  void storeOptions(ClangTidyOptions::OptionMap& Opts) override;
+private:
+  bool HandleMutableFunctionParametersAsWrites;
 };
 
 } // namespace clang::tidy::bugprone

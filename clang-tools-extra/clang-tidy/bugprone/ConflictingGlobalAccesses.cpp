@@ -184,6 +184,9 @@ private:
   // therefore we keep track of whether we are inside of a function or not.
   bool IsInFunction;
 
+  // Same as the HandleMutableFunctionParametersAsWrites option.
+  bool IsWritePossibleThroughFunctionParam;
+
   void addGlobal(DeclarationName Name, SourceLocation Loc, bool IsWrite,
                  bool IsUnchecked);
   void addGlobal(const DeclRefExpr *DR, bool IsWrite, bool IsUnchecked);
@@ -235,7 +238,16 @@ AST_MATCHER_P(Expr, twoGlobalWritesBetweenSequencePoints, const LangStandard *,
 
 ConflictingGlobalAccesses::ConflictingGlobalAccesses(StringRef Name,
                                                      ClangTidyContext *Context)
-    : ClangTidyCheck(Name, Context) {}
+    : ClangTidyCheck(Name, Context),
+      HandleMutableFunctionParametersAsWrites(
+              Options.get("HandleMutableFunctionParametersAsWrites", false))
+{}
+
+void ConflictingGlobalAccesses::storeOptions(ClangTidyOptions::OptionMap& Opts)
+{
+    Options.store(Opts, "HandleMutableFunctionParametersAsWrites",
+                  HandleMutableFunctionParametersAsWrites);
+}
 
 void ConflictingGlobalAccesses::registerMatchers(MatchFinder *Finder) {
 
@@ -253,7 +265,7 @@ void ConflictingGlobalAccesses::check(const MatchFinder::MatchResult &Result) {
   const Expr *E = Result.Nodes.getNodeAs<Expr>("gw");
   assert(E);
 
-  GlobalRWVisitor Visitor;
+  GlobalRWVisitor Visitor(HandleMutableFunctionParametersAsWrites);
   if (const auto *Op = dyn_cast<BinaryOperator>(E)) {
     Visitor.startTraversal(Op->getLHS());
     Visitor.startTraversal(Op->getRHS());
@@ -284,7 +296,10 @@ void ConflictingGlobalAccesses::check(const MatchFinder::MatchResult &Result) {
   }
 }
 
-GlobalRWVisitor::GlobalRWVisitor() : TraversalIndex(0), IsInFunction(false) {}
+GlobalRWVisitor::GlobalRWVisitor(bool IsWritePossibleThroughFunctionParam) 
+    : TraversalIndex(0), IsInFunction(false),
+      IsWritePossibleThroughFunctionParam(IsWritePossibleThroughFunctionParam)
+{}
 
 void GlobalRWVisitor::startTraversal(Expr *E) {
   TraversalIndex++;
@@ -309,6 +324,8 @@ void GlobalRWVisitor::traverseFunctionsToBeChecked() {
 
 bool GlobalRWVisitor::isVariable(const Expr *E) {
   const Type *T = E->getType().getTypePtrOrNull();
+  assert(T);
+
   return isa<DeclRefExpr>(E) && (!T->isRecordType() || T->isUnionType());
 }
 
@@ -353,6 +370,7 @@ bool GlobalRWVisitor::handleAccessedObject(const Expr *E, bool IsWrite,
   int NodeCount = 0;
   while (isa<MemberExpr>(CurrentNode)) {
     const MemberExpr *CurrentField = dyn_cast<MemberExpr>(CurrentNode);
+
     if (CurrentField->isArrow()) {
       return true;
     }
@@ -385,11 +403,13 @@ bool GlobalRWVisitor::handleAccessedObject(const Expr *E, bool IsWrite,
   while (isa<MemberExpr>(CurrentNode)) {
     const MemberExpr *CurrentField = dyn_cast<MemberExpr>(CurrentNode);
     const FieldDecl *Decl = dyn_cast<FieldDecl>(CurrentField->getMemberDecl());
+    assert(Decl);
 
     FieldIndices[NodeCount - 1] = Decl->getFieldIndex();
     const RecordDecl *Record = Decl->getParent();
-    if (Record && Record->isUnion()) {
-      // Not sure what to do if Record isn't a value.
+    assert(Record);
+
+    if (Record->isUnion()) {
       FieldIndices[NodeCount - 1] |= FiUnion;
     }
 
@@ -403,9 +423,7 @@ bool GlobalRWVisitor::handleAccessedObject(const Expr *E, bool IsWrite,
 }
 
 bool GlobalRWVisitor::handleModified(const Expr *Modified, bool IsUnchecked) {
-  if (!Modified) {
-    return true;
-  }
+  assert(Modified);
 
   if (isVariable(Modified)) {
     return handleModifiedVariable(dyn_cast<DeclRefExpr>(Modified), IsUnchecked);
@@ -476,7 +494,10 @@ void GlobalRWVisitor::visitCallExprArgs(CallExpr *CE) {
 }
 
 bool GlobalRWVisitor::VisitCallExpr(CallExpr *CE) {
-  visitCallExprArgs(CE);
+
+  if (IsWritePossibleThroughFunctionParam || isa<CXXOperatorCallExpr>(CE)) {
+    visitCallExprArgs(CE);
+  }
 
   if (!isa_and_nonnull<FunctionDecl>(CE->getCalleeDecl())) {
     return true;

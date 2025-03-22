@@ -1,5 +1,6 @@
 // RUN: %check_clang_tidy -std=c++11 -check-suffixes=,CPP11 %s bugprone-conflicting-global-accesses %t
 // RUN: %check_clang_tidy -std=c++17 %s bugprone-conflicting-global-accesses %t
+// RUN: %check_clang_tidy -std=c++17 -check-suffixes=,PARAM %s bugprone-conflicting-global-accesses %t -config="{CheckOptions: {bugprone-conflicting-global-accesses.HandleMutableFunctionParametersAsWrites: true}}"
 
 int GlobalVarA;
 
@@ -105,12 +106,12 @@ int testFunc5() {
     }
 
     if(addAll(GlobalVarA, incArg(GlobalVarA), 0, 0)) {
-    // CHECK-MESSAGES: :[[@LINE-1]]:8: warning: read/write conflict on global variable GlobalVarA
+    // CHECK-MESSAGES-PARAM: :[[@LINE-1]]:8: warning: read/write conflict on global variable GlobalVarA
         return 1;
     }
 
     if(addAll(GlobalVarA, incArgPtr(&GlobalVarA), 0, 0)) {
-    // CHECK-MESSAGES: :[[@LINE-1]]:8: warning: read/write conflict on global variable GlobalVarA
+    // CHECK-MESSAGES-PARAM: :[[@LINE-1]]:8: warning: read/write conflict on global variable GlobalVarA
         return 2;
     }
 
@@ -221,6 +222,13 @@ struct QuiteComplexStruct {
     int VarE;
 } QuiteComplexGlobalStruct;
 
+union {
+    int VarA;
+    struct {
+        int VarB, VarC;
+    } StructA;
+} GlobalUnion;
+
 
 void testFunc8() {
 
@@ -231,8 +239,17 @@ void testFunc8() {
     addAll(GlobalStruct.StructA.VarC, GlobalStruct.StructA.VarD++, GlobalStruct.VarB++, GlobalStruct.VarA++);
     addAll(GlobalStruct.VarA, (GlobalStruct.StructA = {}, 0), 0, 0);
 
+    // Actually, I'm not sure about this. In the next check, the thing that
+    // looks like an assignment is actually an overload operator call, which is
+    // a call expression.
+    // 
+    // In my opinion, this should be checked by default, and it is. But by
+    // default, the non-const pointer and reference call expression arguments
+    // shouldn't be considered as writes. They aren't unless they are overloaded
+    // operator call expressions.
     addAll(GlobalStruct.StructA.VarD, (GlobalStruct.StructA = {}, 0), 0, 0);
     // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: read/write conflict on the field of the global object GlobalStruct
+
     addAll(GlobalStruct.VarA, (GlobalStruct.VarA++, 0), 0, 0);
     // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: read/write conflict on the field of the global object GlobalStruct
     addAll(GlobalStruct.StructA.VarC, (GlobalStruct = {}, 0), 0, 0);
@@ -264,4 +281,10 @@ void testFunc8() {
     addAll(QuiteComplexGlobalStruct.UnionA.UnionB.PtrA->VarA, QuiteComplexGlobalStruct.UnionA.UnionB.VarB++, 0, 0);
     // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: read/write conflict on the field of the global object QuiteComplexGlobalStruct
     addAll(QuiteComplexGlobalStruct.UnionA.UnionB.PtrA->VarA, QuiteComplexGlobalStruct.VarA++, 0, 0);
+
+    addAll(QuiteComplexGlobalStruct.UnionA.UnionB.PtrA->VarA, (long)QuiteComplexGlobalStruct.UnionA.UnionB.PtrA++, 0, 0);
+    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: read/write conflict on the field of the global object QuiteComplexGlobalStruct
+
+    addAll(GlobalUnion.VarA, 0, GlobalUnion.StructA.VarB++, 0);
+    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: read/write conflict on the field of the global object GlobalUnion
 }
