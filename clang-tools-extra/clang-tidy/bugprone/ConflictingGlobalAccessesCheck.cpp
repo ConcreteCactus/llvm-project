@@ -206,12 +206,6 @@ private:
   bool handleAccessedObject(const Expr *E, bool IsWrite, bool IsUnchecked);
   bool isVariable(const Expr *E);
 };
-} // namespace
-
-static bool isGlobalDecl(const VarDecl *VD) {
-  return VD && VD->hasGlobalStorage() && VD->getLocation().isValid() &&
-         !VD->getType().isConstQualified();
-}
 
 AST_MATCHER_P(BinaryOperator, unsequencedBinaryOperator, const LangStandard *,
               LangStd) {
@@ -235,6 +229,12 @@ AST_MATCHER_P(BinaryOperator, unsequencedBinaryOperator, const LangStandard *,
   }
 
   return true;
+}
+} // namespace
+
+static bool isGlobalDecl(const VarDecl *VD) {
+  return VD && VD->hasGlobalStorage() && VD->getLocation().isValid() &&
+         !VD->getType().isConstQualified();
 }
 
 ConflictingGlobalAccessesCheck::ConflictingGlobalAccessesCheck(
