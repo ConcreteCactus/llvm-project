@@ -6,10 +6,10 @@ bugprone-conflicting-global-accesses
 Finds conflicting accesses on global variables.
 
 Modifying twice or reading and modifying a memory location without a
-defined sequence of the operations is undefined behavior. This checker is
-similar to the -Wunsequenced clang warning, however it only looks at global
-variables and therefore can find conflicting actions recursively inside
-functions as well.
+defined sequence of the operations is either undefined behavior or has
+unspecified order. This checker is similar to the -Wunsequenced clang warning,
+however it only looks at global variables and therefore can find conflicting
+actions recursively inside functions as well.
 
 For example::
 
@@ -30,10 +30,29 @@ However global variables allow for more complex scenarios that
       return globalVar + incFun(); // This is not detected by -Wunsequenced.
     }
 
-This checker attempts to detect such undefined behavior. It recurses into
-functions that are inside the same translation unit. It also attempts not to
-flag cases that are already covered by -Wunsequenced. Global unions and
-structs are also handled.
+This checker attempts to detect such cases. It recurses into functions that are
+inside the same translation unit. It also attempts not to flag cases that are
+already covered by -Wunsequenced. Global unions and structs are also handled.
+For example::
+    
+    typedef struct {
+        int A;
+        float B;
+    } IntAndFloat;
+
+    IntAndFloat GlobalIF;
+
+    int globalIFGetSum() {
+        int sum = GlobalIF.A + (int)GlobalIF.B;
+        GlobalIF = (IntAndFloat){};
+        return sum;
+    }
+
+    int main() {
+        // The following printf could give different results on different
+        // compilers.
+        printf("sum: %i, int: %i", globalIFGetSum(), GlobalIF.A);
+    }
 
 Options
 -------
@@ -50,3 +69,4 @@ Options
     func(globalVar); // <- this could be a write to globalVar.
 
     This option is disabled by default.
+
