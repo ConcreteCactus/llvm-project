@@ -193,6 +193,10 @@ private:
   // -Wunsequenced, in those cases we consider everything unchecked.
   bool IsGloballyUnchecked;
 
+  // When we aren't in a function we don't need to check all the destructors of
+  // temporary objects.
+  bool IsInFunction;
+
   // Same as the HandleMutableFunctionParametersAsWrites option.
   bool IsWritePossibleThroughFunctionParam;
 
@@ -271,8 +275,10 @@ void ConflictingGlobalAccessesCheck::registerMatchers(MatchFinder *Finder) {
   Finder->addMatcher(
       stmt(traverse(TK_AsIs, callExpr().bind("gw"))), this);
 
-  Finder->addMatcher(
-      stmt(traverse(TK_AsIs, initListExpr().bind("gw"))), this);
+  if (!LangStd->isCPlusPlus11()) {
+      Finder->addMatcher(
+          stmt(traverse(TK_AsIs, initListExpr().bind("gw"))), this);
+  }
 
   Finder->addMatcher(
       stmt(traverse(TK_AsIs, cxxConstructExpr().bind("gw"))), this);
@@ -352,7 +358,7 @@ void ConflictingGlobalAccessesCheck::check(const MatchFinder::MatchResult &Resul
 }
 
 GlobalRWVisitor::GlobalRWVisitor(bool IsWritePossibleThroughFunctionParam) 
-    : TraversalIndex(0), IsGloballyUnchecked(false),
+    : TraversalIndex(0), IsGloballyUnchecked(false), IsInFunction(false),
       IsWritePossibleThroughFunctionParam(IsWritePossibleThroughFunctionParam)
 {}
 
@@ -360,6 +366,7 @@ void GlobalRWVisitor::startTraversal(const Expr *E, bool StartUnchecked) {
   TraversalIndex++;
   FunctionsToBeChecked.clear();
   IsGloballyUnchecked = StartUnchecked;
+  IsInFunction = false;
   TraverseStmt(const_cast<Expr*>(E));
 
   // We keep a list of functions to be checked during traversal so that they are
@@ -370,6 +377,7 @@ void GlobalRWVisitor::startTraversal(const Expr *E, bool StartUnchecked) {
 
 void GlobalRWVisitor::traverseFunctionsToBeChecked() {
   IsGloballyUnchecked = true;
+  IsInFunction = true;
 
   // We could find more functions to be checked while checking functions.
   // Because a simple iterator could get invalidated, we index into the array.
@@ -691,6 +699,14 @@ bool GlobalRWVisitor::VisitCXXConstructExpr(CXXConstructExpr *CE) {
     const CXXConstructorDecl *CD = CE->getConstructor();
 
     checkFunctionLater(static_cast<const FunctionDecl*>(CD));
+
+    // If we are traversing a function, then all the temporary and non-temporary
+    // objects will have their destructor called at the end of the scope. So
+    // better traverse the destructors as well.
+    if (IsInFunction) {
+        const CXXRecordDecl* RD = CD->getParent();
+        checkDestructorLater(RD);
+    }
     return true;
 }
 

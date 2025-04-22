@@ -1,6 +1,12 @@
-// RUN: %check_clang_tidy -std=c++11,c++14 -check-suffixes=,CPP11 %s bugprone-conflicting-global-accesses %t
-// RUN: %check_clang_tidy -std=c++17-or-later %s bugprone-conflicting-global-accesses %t
-// RUN: %check_clang_tidy -std=c++17-or-later -check-suffixes=,PARAM %s bugprone-conflicting-global-accesses %t -config="{CheckOptions: {bugprone-conflicting-global-accesses.HandleMutableFunctionParametersAsWrites: true}}"
+// RUN: %check_clang_tidy -std=c++98 -check-suffixes=,PRE-CPP11,PRE-CPP17 %s bugprone-conflicting-global-accesses %t
+// RUN: %check_clang_tidy -std=c++11,c++14 -check-suffixes=,POST-CPP11,PRE-CPP17 %s bugprone-conflicting-global-accesses %t
+// RUN: %check_clang_tidy -std=c++17-or-later -check-suffixes=,POST-CPP11 %s bugprone-conflicting-global-accesses %t
+// RUN: %check_clang_tidy -std=c++17-or-later -check-suffixes=,POST-CPP11,PARAM %s bugprone-conflicting-global-accesses %t -config="{CheckOptions: {bugprone-conflicting-global-accesses.HandleMutableFunctionParametersAsWrites: true}}"
+
+#if __cplusplus > 199711L
+    // Used to exclude code that would give compiler errors on older standards.
+    #define POST_CPP11
+#endif
 
 int GlobalVarA;
 
@@ -80,7 +86,7 @@ bool testFunc4(void) {
     }
 
     int C = GlobalVarA << incGlobalVarA(); (void)C;
-    // CHECK-MESSAGES-CPP11: :[[@LINE-1]]:13: warning: read/write conflict on global variable GlobalVarA
+    // CHECK-MESSAGES-PRE-CPP17: :[[@LINE-1]]:13: warning: read/write conflict on global variable GlobalVarA
 
     return false;
 }
@@ -173,10 +179,10 @@ int testFunc6() {
     
     int Array[] = {1, 2, 3};
     Array[GlobalVarA] = incGlobalVarA();
-    // CHECK-MESSAGES-CPP11: :[[@LINE-1]]:5: warning: read/write conflict on global variable GlobalVarA
+    // CHECK-MESSAGES-PRE-CPP17: :[[@LINE-1]]:5: warning: read/write conflict on global variable GlobalVarA
     
     *(Array + GlobalVarA) = incGlobalVarA();
-    // CHECK-MESSAGES-CPP11: :[[@LINE-1]]:5: warning: read/write conflict on global variable GlobalVarA
+    // CHECK-MESSAGES-PRE-CPP17: :[[@LINE-1]]:5: warning: read/write conflict on global variable GlobalVarA
 
     *(Array + GlobalVarA) = getGlobalVarA();
     // This is fine
@@ -184,7 +190,7 @@ int testFunc6() {
     // Should also check the array subscript operator
 
     int B = (Array + GlobalVarA)[incGlobalVarA()]; (void)B;
-    // CHECK-MESSAGES-CPP11: :[[@LINE-1]]:13: warning: read/write conflict on global variable GlobalVarA
+    // CHECK-MESSAGES-PRE-CPP17: :[[@LINE-1]]:13: warning: read/write conflict on global variable GlobalVarA
 
     int C = (Array + GlobalVarA)[getGlobalVarA()]; (void)C;
     // This is also fine
@@ -252,7 +258,7 @@ void testFunc7() {
     
     TestClass1 Objects[3];
     int A = (Objects + Objects[0].getStaticVar1())[TestClass1::StaticVar1++]; (void)A;
-    // CHECK-MESSAGES-CPP11: :[[@LINE-1]]:13: warning: read/write conflict on global variable StaticVar1
+    // CHECK-MESSAGES-PRE-CPP17: :[[@LINE-1]]:13: warning: read/write conflict on global variable StaticVar1
 }
 
 struct {
@@ -304,35 +310,12 @@ void testFunc8() {
     addAll(GlobalStruct.VarA, GlobalStruct.VarB++, 0, 0);
     addAll(GlobalStruct.StructA.VarD, GlobalStruct.VarA++, 0, 0);
     addAll(GlobalStruct.StructA.VarC, GlobalStruct.StructA.VarD++, GlobalStruct.VarB++, GlobalStruct.VarA++);
-    addAll(GlobalStruct.VarA, (GlobalStruct.StructA = {}, 0), 0, 0);
-
-    // Actually, I'm not sure about this. In the next check, the thing that
-    // looks like an assignment is actually an overload operator call, which is
-    // a call expression.
-    // 
-    // In my opinion, this should be checked by default, and it is. But by
-    // default, the non-const pointer and reference call expression arguments
-    // shouldn't be considered as writes. They aren't unless they are overloaded
-    // operator call expressions.
-    addAll(GlobalStruct.StructA.VarD, (GlobalStruct.StructA = {}, 0), 0, 0);
-    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: read/write conflict on the field of the global object GlobalStruct
 
     addAll(GlobalStruct.VarA, (GlobalStruct.VarA++, 0), 0, 0);
     // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: read/write conflict on the field of the global object GlobalStruct
-    addAll(GlobalStruct.StructA.VarC, (GlobalStruct = {}, 0), 0, 0);
-    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: read/write conflict on the field of the global object GlobalStruct
-    addAll((GlobalStruct.StructA = {}, 1), (GlobalStruct = {}, 0), 0, 0);
-    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: read/write conflict on the field of the global object GlobalStruct
-    addAll((GlobalStruct.StructA = {}, 1), (GlobalStruct.VarA++, 0), GlobalStruct.StructA.VarD, 0);
-    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: read/write conflict on the field of the global object GlobalStruct
-    
     addAll(ComplexGlobalStruct.UnionA.VarD, ComplexGlobalStruct.UnionA.StructA.VarC++, 0, 0);
     // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: read/write conflict on the field of the global object ComplexGlobalStruct
-    addAll(ComplexGlobalStruct.UnionA.StructA.VarB, (ComplexGlobalStruct.UnionA.StructA = {}, 0), 0, 0);
-    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: read/write conflict on the field of the global object ComplexGlobalStruct
     addAll(ComplexGlobalStruct.UnionA.StructA.VarB, ComplexGlobalStruct.UnionA.VarD++, 0, 0);
-    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: read/write conflict on the field of the global object ComplexGlobalStruct
-    addAll((ComplexGlobalStruct.UnionA = {}, 0), ComplexGlobalStruct.UnionA.VarD++, 0, 0);
     // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: read/write conflict on the field of the global object ComplexGlobalStruct
 
     addAll(ComplexGlobalStruct.UnionA.StructA.VarB, ComplexGlobalStruct.UnionA.StructA.VarC++, 0, 0);
@@ -354,7 +337,28 @@ void testFunc8() {
 
     addAll(GlobalUnion.VarA, 0, GlobalUnion.StructA.VarB++, 0);
     // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: read/write conflict on the field of the global object GlobalUnion
+    
+#ifdef POST_CPP11
+    addAll(GlobalStruct.StructA.VarD, (GlobalStruct.StructA = {}, 0), 0, 0);
+    // CHECK-MESSAGES-POST-CPP11: :[[@LINE-1]]:5: warning: read/write conflict on the field of the global object GlobalStruct
+    addAll(GlobalStruct.StructA.VarC, (GlobalStruct = {}, 0), 0, 0);
+    // CHECK-MESSAGES-POST-CPP11: :[[@LINE-1]]:5: warning: read/write conflict on the field of the global object GlobalStruct
+
+    addAll(GlobalStruct.VarA, (GlobalStruct.StructA = {}, 0), 0, 0);
+
+    addAll((GlobalStruct.StructA = {}, 1), (GlobalStruct = {}, 0), 0, 0);
+    // CHECK-MESSAGES-POST-CPP11: :[[@LINE-1]]:5: warning: read/write conflict on the field of the global object GlobalStruct
+    addAll((GlobalStruct.StructA = {}, 1), (GlobalStruct.VarA++, 0), GlobalStruct.StructA.VarD, 0);
+    // CHECK-MESSAGES-POST-CPP11: :[[@LINE-1]]:5: warning: read/write conflict on the field of the global object GlobalStruct
+ 
+    addAll((ComplexGlobalStruct.UnionA = {}, 0), ComplexGlobalStruct.UnionA.VarD++, 0, 0);
+    // CHECK-MESSAGES-POST-CPP11: :[[@LINE-1]]:5: warning: read/write conflict on the field of the global object ComplexGlobalStruct
+    
+    addAll(ComplexGlobalStruct.UnionA.StructA.VarB, (ComplexGlobalStruct.UnionA.StructA = {}, 0), 0, 0);
+    // CHECK-MESSAGES-POST-CPP11: :[[@LINE-1]]:5: warning: read/write conflict on the field of the global object ComplexGlobalStruct
+#endif
 }
+
 
 int GlobalVarB;
 
@@ -370,22 +374,22 @@ struct TwoValue {
 // Check initializers
 void testFunc9() {
     int Arr[] = { incGlobalVarB(), incGlobalVarB() }; (void)Arr;
-    // CHECK-MESSAGES: :[[@LINE-1]]:17: warning: read/write conflict on global variable GlobalVarB
+    // CHECK-MESSAGES-PRE-CPP11: :[[@LINE-1]]:17: warning: read/write conflict on global variable GlobalVarB
     
     TwoValue Ts1 = { incGlobalVarB(), GlobalVarB }; (void)Ts1;
-    // CHECK-MESSAGES: :[[@LINE-1]]:20: warning: read/write conflict on global variable GlobalVarB
+    // CHECK-MESSAGES-PRE-CPP11: :[[@LINE-1]]:20: warning: read/write conflict on global variable GlobalVarB
     
     Ts1 = (TwoValue){ GlobalVarB, incGlobalVarB() };
-    // CHECK-MESSAGES: :[[@LINE-1]]:21: warning: read/write conflict on global variable GlobalVarB
+    // CHECK-MESSAGES-PRE-CPP11: :[[@LINE-1]]:21: warning: read/write conflict on global variable GlobalVarB
     
     TwoValue TsArr[] = { { incGlobalVarB(), 0 }, { 0, GlobalVarB } }; (void)TsArr;
-    // CHECK-MESSAGES: :[[@LINE-1]]:24: warning: read/write conflict on global variable GlobalVarB
+    // CHECK-MESSAGES-PRE-CPP11: :[[@LINE-1]]:24: warning: read/write conflict on global variable GlobalVarB
     
     TwoValue TsArr2[4] = { [1].A = incGlobalVarB(), [3] = { .B = 0, .A = GlobalVarB } }; (void)TsArr2;
-    // CHECK-MESSAGES: :[[@LINE-1]]:26: warning: read/write conflict on global variable GlobalVarB
+    // CHECK-MESSAGES-PRE-CPP11: :[[@LINE-1]]:26: warning: read/write conflict on global variable GlobalVarB
 
     TwoValue Ts2 = { .A = incGlobalVarB(), .B = GlobalVarB }; (void)Ts2;
-    // CHECK-MESSAGES: :[[@LINE-1]]:20: warning: read/write conflict on global variable GlobalVarB
+    // CHECK-MESSAGES-PRE-CPP11: :[[@LINE-1]]:20: warning: read/write conflict on global variable GlobalVarB
 }
 
 class InstanceCountedClass {
@@ -428,6 +432,20 @@ class NestedGlobalDefaultFieldClass {
 class GlobalDefaultFieldBaseClass : public GlobalDefaultFieldClass {
 };
 
+class DestructCountedClass {
+public:
+    static int DestructCount;
+    ~DestructCountedClass() {
+        DestructCount++;
+    }
+
+    operator int() {
+        return 1;
+    }
+};
+
+int DestructCountedClass::DestructCount = 0;
+
 int createAndDestructTestClass4() {
     NestedInstanceCountedClass Test; (void)Test;
     return InstanceCountedClass::InstanceCount;
@@ -439,10 +457,16 @@ int destructParam(T Param) {
     return 0;
 }
 
+int temporaryDestroy() {
+    int K = 42 + DestructCountedClass(); 
+    // Destructor gets called here.
+    return K;
+}
+
 // Check constructors/destructors
 void testFunc10() {
     InstanceCountedClass* TestArr[] = { new InstanceCountedClass(), new InstanceCountedClass() };
-    // CHECK-MESSAGES: :[[@LINE-1]]:39: warning: read/write conflict on global variable InstanceCount
+    // CHECK-MESSAGES-PRE-CPP11: :[[@LINE-1]]:39: warning: read/write conflict on global variable InstanceCount
     (void)TestArr;
     
     InstanceCountedClass TestArr2[2]; // I'm not sure about this. Is this sequenced?
@@ -490,6 +514,14 @@ void testFunc10() {
     
     int J = incGlobalVarB() + (GlobalDefaultFieldBaseClass(), 1); (void)J;
     // CHECK-MESSAGES: :[[@LINE-1]]:13: warning: read/write conflict on global variable GlobalVarB
+    
+    int K = DestructCountedClass::DestructCount + DestructCountedClass(); (void)K;
+    // The temporary should be destroyed at the end of the full-expression, so
+    // this should be fine.
+
+    int L = DestructCountedClass::DestructCount + temporaryDestroy(); (void)L;
+    // CHECK-MESSAGES: :[[@LINE-1]]:13: warning: read/write conflict on global variable DestructCount
+
 }
 
 void functionWithDefaultParam(int A, int B = GlobalVarB) {
@@ -521,10 +553,10 @@ void testFunc12() {
     DefaultConstructorArgClass TestObj1(0, 0, 0);
     // This is fine
     
-    DefaultConstructorArgClass TestObj2(nullptr, GlobalVarB, incGlobalVarB());
+    DefaultConstructorArgClass TestObj2((void*)0, GlobalVarB, incGlobalVarB());
     // CHECK-MESSAGES: :[[@LINE-1]]:32: warning: read/write conflict on global variable GlobalVarB
 
-    DefaultConstructorArgClass TestObj3(nullptr, GlobalVarB);
+    DefaultConstructorArgClass TestObj3((void*)0, GlobalVarB);
     // CHECK-MESSAGES: :[[@LINE-1]]:32: warning: read/write conflict on global variable GlobalVarB
     
     DefaultConstructorArgClass TestObj4(0, GlobalVarB);
