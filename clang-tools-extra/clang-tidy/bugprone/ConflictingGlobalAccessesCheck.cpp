@@ -204,19 +204,16 @@ AST_MATCHER_P(BinaryOperator, unsequencedBinaryOperator, const LangStandard *,
   const BinaryOperator *Op = &Node;
 
   const BinaryOperator::Opcode Code = Op->getOpcode();
-  if (Code == BO_LAnd || Code == BO_LOr || Code == BO_Comma) {
+  if (Code == BO_LAnd || Code == BO_LOr || Code == BO_Comma)
     return false;
-  }
 
-  if (Op->isAssignmentOp() && isa<DeclRefExpr>(Op->getLHS())) {
+  if (Op->isAssignmentOp() && isa<DeclRefExpr>(Op->getLHS()))
     return false;
-  }
 
   if (LangStd->isCPlusPlus17() &&
       (Code == BO_Shl || Code == BO_Shr || Code == BO_PtrMemD ||
-       Code == BO_PtrMemI || Op->isAssignmentOp())) {
+       Code == BO_PtrMemI || Op->isAssignmentOp()))
     return false;
-  }
 
   return true;
 }
@@ -251,17 +248,15 @@ void ConflictingGlobalAccessesCheck::registerMatchers(MatchFinder *Finder) {
       this);
 
   // Array subscript expressions became sequenced in C++17
-  if (!LangStd->isCPlusPlus17()) {
+  if (!LangStd->isCPlusPlus17())
     Finder->addMatcher(stmt(traverse(TK_AsIs, arraySubscriptExpr().bind("gw"))),
                        this);
-  }
 
   Finder->addMatcher(stmt(traverse(TK_AsIs, callExpr().bind("gw"))), this);
 
-  if (!LangStd->isCPlusPlus11()) {
+  if (!LangStd->isCPlusPlus11())
     Finder->addMatcher(stmt(traverse(TK_AsIs, initListExpr().bind("gw"))),
                        this);
-  }
 
   Finder->addMatcher(stmt(traverse(TK_AsIs, cxxConstructExpr().bind("gw"))),
                      this);
@@ -322,21 +317,18 @@ void ConflictingGlobalAccessesCheck::check(
   const llvm::SmallVector<TraversalAggregation> &Globals =
       Visitor.getGlobalsFound();
 
-  for (uint32_t I = 0; I < Globals.size(); I++) {
-    if (Globals[I].shouldBeReported()) {
+  for (uint32_t I = 0; I < Globals.size(); I++)
+    if (Globals[I].shouldBeReported())
       diag(E->getBeginLoc(), "read/write conflict on global variable " +
                                  Globals[I].getDeclName().getAsString());
-    }
-  }
+
   const llvm::SmallVector<ObjectTraversalAggregation> &ObjectGlobals =
       Visitor.getObjectGlobalsFound();
-  for (uint32_t I = 0; I < ObjectGlobals.size(); I++) {
-    if (ObjectGlobals[I].shouldBeReported()) {
+  for (uint32_t I = 0; I < ObjectGlobals.size(); I++)
+    if (ObjectGlobals[I].shouldBeReported())
       diag(E->getBeginLoc(), "read/write conflict on the field of the global "
                              "object " +
                                  ObjectGlobals[I].getDeclName().getAsString());
-    }
-  }
 }
 
 GlobalRWVisitor::GlobalRWVisitor(bool IsWritePossibleThroughFunctionParam)
@@ -353,21 +345,20 @@ void GlobalRWVisitor::startTraversal(const Expr *E, bool StartUnchecked) {
 
 bool GlobalRWVisitor::isVariable(const Expr *E) {
   const Type *T = E->getType().getTypePtrOrNull();
-  if (!T) {
+  if (!T)
     return false;
-  }
 
   return isa<DeclRefExpr>(E) && (!T->isRecordType() || T->isUnionType());
 }
 
 bool GlobalRWVisitor::VisitDeclRefExpr(DeclRefExpr *DR) {
   const auto *VD = dyn_cast<VarDecl>(DR->getDecl());
-  if (!VD) {
+  if (!VD)
     return true;
-  }
-  if (!isVariable(DR)) {
+
+  if (!isVariable(DR))
     return handleAccessedObject(DR, /*IsWrite*/ false, /*IsUnchecked*/ false);
-  }
+
   if (isGlobalDecl(VD)) {
     addGlobal(VD->getDeclName(), VD->getBeginLoc(), /*IsWrite*/ false,
               /*IsUnchecked*/ false);
@@ -383,15 +374,15 @@ bool GlobalRWVisitor::VisitMemberExpr(MemberExpr *ME) {
 bool GlobalRWVisitor::handleModifiedVariable(const DeclRefExpr *DR,
                                              bool IsUnchecked) {
   const auto *VD = dyn_cast<VarDecl>(DR->getDecl());
-  if (!VD) {
+  if (!VD)
     return true;
-  }
 
   if (isGlobalDecl(VD)) {
     addGlobal(VD->getDeclName(), VD->getBeginLoc(), /*IsWrite*/ true,
               IsUnchecked);
     return false;
   }
+
   return true;
 }
 
@@ -402,32 +393,27 @@ bool GlobalRWVisitor::handleAccessedObject(const Expr *E, bool IsWrite,
   while (isa<MemberExpr>(CurrentNode)) {
     const MemberExpr *CurrentField = dyn_cast<MemberExpr>(CurrentNode);
 
-    if (CurrentField->isArrow()) {
+    if (CurrentField->isArrow())
       return true;
-    }
 
     const ValueDecl *Decl = CurrentField->getMemberDecl();
-    if (!isa<FieldDecl>(Decl)) {
+    if (!isa<FieldDecl>(Decl))
       return true;
-    }
 
     CurrentNode = CurrentField->getBase();
     NodeCount++;
   }
 
   const DeclRefExpr *Base = dyn_cast<DeclRefExpr>(CurrentNode);
-  if (!Base) {
+  if (!Base)
     return true;
-  }
 
   const VarDecl *BaseDecl = dyn_cast<VarDecl>(Base->getDecl());
-  if (!BaseDecl) {
+  if (!BaseDecl)
     return true;
-  }
 
-  if (!isGlobalDecl(BaseDecl)) {
+  if (!isGlobalDecl(BaseDecl))
     return true;
-  }
 
   FieldIndexArray FieldIndices(NodeCount);
   CurrentNode = E;
@@ -440,9 +426,8 @@ bool GlobalRWVisitor::handleAccessedObject(const Expr *E, bool IsWrite,
     const RecordDecl *Record = Decl->getParent();
     assert(Record);
 
-    if (Record->isUnion()) {
+    if (Record->isUnion())
       FieldIndices[NodeCount - 1] |= FiUnion;
-    }
 
     CurrentNode = CurrentField->getBase();
     NodeCount--;
@@ -456,9 +441,8 @@ bool GlobalRWVisitor::handleAccessedObject(const Expr *E, bool IsWrite,
 bool GlobalRWVisitor::handleModified(const Expr *Modified, bool IsUnchecked) {
   assert(Modified);
 
-  if (isVariable(Modified)) {
+  if (isVariable(Modified))
     return handleModifiedVariable(dyn_cast<DeclRefExpr>(Modified), IsUnchecked);
-  }
 
   return handleAccessedObject(Modified, /*IsWrite*/ true, IsUnchecked);
 }
@@ -466,22 +450,19 @@ bool GlobalRWVisitor::handleModified(const Expr *Modified, bool IsUnchecked) {
 bool GlobalRWVisitor::VisitUnaryOperator(UnaryOperator *Op) {
   UnaryOperator::Opcode Code = Op->getOpcode();
   if (Code == UO_PostInc || Code == UO_PostDec || Code == UO_PreInc ||
-      Code == UO_PreDec) {
+      Code == UO_PreDec)
     return handleModified(Op->getSubExpr(), /*IsUnchecked*/ false);
-  }
 
   // Ignore the AddressOf operator as it doesn't read the variable.
-  if (Code == UO_AddrOf && isa<DeclRefExpr>(Op->getSubExpr())) {
+  if (Code == UO_AddrOf && isa<DeclRefExpr>(Op->getSubExpr()))
     return false;
-  }
 
   return true;
 }
 
 bool GlobalRWVisitor::VisitBinaryOperator(BinaryOperator *Op) {
-  if (Op->isAssignmentOp()) {
+  if (Op->isAssignmentOp())
     return handleModified(Op->getLHS(), /*IsUnchecked*/ false);
-  }
 
   return true;
 }
@@ -494,50 +475,42 @@ void GlobalRWVisitor::visitFunctionLikeExprArgs(
   for (auto It = Arguments.begin(); It != ArgumentsEnd; It++, I++) {
     const Expr *Arg = *It;
 
-    if (I >= FT->getNumParams()) {
+    if (I >= FT->getNumParams())
       continue;
-    }
 
     if (const auto *Op = dyn_cast<UnaryOperator>(Arg)) {
-      if (Op->getOpcode() != UO_AddrOf) {
+      if (Op->getOpcode() != UO_AddrOf)
         continue;
-      }
 
       if (const auto *PtrType = dyn_cast_if_present<PointerType>(
               FT->getParamType(I).getTypePtrOrNull())) {
-        if (PtrType->getPointeeType().isConstQualified()) {
+        if (PtrType->getPointeeType().isConstQualified())
           continue;
-        }
 
-        if (handleModified(Op->getSubExpr(), /*IsUnchecked*/ true)) {
+        if (handleModified(Op->getSubExpr(), /*IsUnchecked*/ true))
           continue;
-        }
       }
     }
 
     if (const auto *RefType = dyn_cast_if_present<ReferenceType>(
             FT->getParamType(I).getTypePtrOrNull())) {
-      if (RefType->getPointeeType().isConstQualified()) {
+      if (RefType->getPointeeType().isConstQualified())
         continue;
-      }
 
-      if (handleModified(Arg, /*IsUnchecked*/ true)) {
+      if (handleModified(Arg, /*IsUnchecked*/ true))
         continue;
-      }
     }
   }
 }
 
 void GlobalRWVisitor::visitCallExprArgs(const CallExpr *CE) {
   const Type *CT = CE->getCallee()->getType().getTypePtrOrNull();
-  if (const auto *PT = dyn_cast_if_present<PointerType>(CT)) {
+  if (const auto *PT = dyn_cast_if_present<PointerType>(CT))
     CT = PT->getPointeeType().getTypePtrOrNull();
-  }
 
   const auto *ProtoType = dyn_cast_if_present<FunctionProtoType>(CT);
-  if (!ProtoType) {
+  if (!ProtoType)
     return;
-  }
 
   visitFunctionLikeExprArgs(ProtoType, CE->arguments());
 }
@@ -545,31 +518,27 @@ void GlobalRWVisitor::visitCallExprArgs(const CallExpr *CE) {
 void GlobalRWVisitor::visitConstructExprArgs(const CXXConstructExpr *E) {
   const FunctionDecl *Decl = E->getConstructor();
   const Type *T = Decl->getType().getTypePtrOrNull();
-  if (!T) {
+  if (!T)
     return;
-  }
 
   const auto *FT = dyn_cast<FunctionProtoType>(T);
-  if (!FT) {
+  if (!FT)
     return;
-  }
 
   visitFunctionLikeExprArgs(FT, E->arguments());
 }
 
 bool GlobalRWVisitor::VisitCallExpr(CallExpr *CE) {
 
-  if (IsWritePossibleThroughFunctionParam || isa<CXXOperatorCallExpr>(CE)) {
+  if (IsWritePossibleThroughFunctionParam || isa<CXXOperatorCallExpr>(CE))
     visitCallExprArgs(CE);
-  }
 
   return ExecutionVisitor::VisitCallExpr(CE);
 }
 
 bool GlobalRWVisitor::VisitCXXConstructExpr(CXXConstructExpr *CE) {
-  if (IsWritePossibleThroughFunctionParam) {
+  if (IsWritePossibleThroughFunctionParam)
     visitConstructExprArgs(CE);
-  }
 
   return ExecutionVisitor::VisitCXXConstructExpr(CE);
 }
@@ -631,17 +600,20 @@ void TraversalAggregation::addGlobalRW(SourceLocation Loc, AccessKind Access,
     MainPart = TraversalResult(Index, Loc, Access);
     return;
   }
-  if (isReportedByWunsequenced()) {
+
+  if (isReportedByWunsequenced())
     return;
-  }
+
   if (MainPart.IndexCreated == Index) {
     MainPart.addNewAccess(Loc, Access);
     return;
   }
+
   if (!hasTwoAccesses()) {
     OtherPart = TraversalResult(Index, Loc, Access);
     return;
   }
+
   if (OtherPart.IndexCreated == Index) {
     OtherPart.addNewAccess(Loc, Access);
     return;
@@ -652,17 +624,16 @@ void TraversalAggregation::addGlobalRW(SourceLocation Loc, AccessKind Access,
   switch (Access) {
   case AkWrite:
   case AkUncheckedWrite: {
-    if (OtherPart.Kind & (TrRead | TrWrite)) {
+    if (OtherPart.Kind & (TrRead | TrWrite))
       MainPart = OtherPart;
-    }
+
     OtherPart = TraversalResult(Index, Loc, Access);
     break;
   }
   case AkRead: {
     if (!(MainPart.Kind & TrWrite) &&
-        (OtherPart.Kind & (TrWrite | TrUncheckedWrite))) {
+        (OtherPart.Kind & (TrWrite | TrUncheckedWrite)))
       MainPart = OtherPart;
-    }
     OtherPart = TraversalResult(Index, Loc, Access);
     break;
   }
@@ -759,15 +730,14 @@ bool ObjectTraversalAggregation::shouldBeReported() const {
 
 bool ObjectTraversalAggregation::shouldBeReportedRec(
     const ObjectAccessTree *Node) const {
-  if (Node->OwnAccesses.hasConflictingOperations()) {
+  if (Node->OwnAccesses.hasConflictingOperations())
     return true;
-  }
+
   ObjectAccessTree::FieldMap::const_iterator FieldIt = Node->Fields.begin();
-  for (; FieldIt != Node->Fields.end(); FieldIt++) {
-    if (shouldBeReportedRec(FieldIt->second.get())) {
+  for (; FieldIt != Node->Fields.end(); FieldIt++)
+    if (shouldBeReportedRec(FieldIt->second.get()))
       return true;
-    }
-  }
+
   return false;
 }
 
@@ -783,9 +753,9 @@ void ObjectAccessTree::addFieldToAll(SourceLocation Loc, AccessKind Access,
   OwnAccesses.addGlobalRW(Loc, Access, Index);
   UnionTemporalAccesses.addGlobalRW(Loc, Access, Index);
   FieldMap::iterator FieldIt = Fields.begin();
-  for (; FieldIt != Fields.end(); FieldIt++) {
+
+  for (; FieldIt != Fields.end(); FieldIt++)
     FieldIt->second->addFieldToAll(Loc, Access, Index);
-  }
 }
 
 void ObjectAccessTree::addFieldToAllExcept(uint16_t ExceptIndex,
@@ -794,11 +764,10 @@ void ObjectAccessTree::addFieldToAllExcept(uint16_t ExceptIndex,
 
   UnionTemporalAccesses.addGlobalRW(Loc, Access, Index);
   FieldMap::const_iterator FieldIt = Fields.begin();
-  for (; FieldIt != Fields.end(); FieldIt++) {
-    if (FieldIt->first != ExceptIndex) {
+
+  for (; FieldIt != Fields.end(); FieldIt++)
+    if (FieldIt->first != ExceptIndex)
       FieldIt->second->addFieldToAll(Loc, Access, Index);
-    }
-  }
 }
 
 } // namespace clang::tidy::bugprone

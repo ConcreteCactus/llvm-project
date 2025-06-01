@@ -34,22 +34,19 @@ protected:
   bool isInFunction() const { return IsInFunction; }
 
   void checkFunctionLater(const FunctionDecl *FD) {
-    if (!FD->hasBody()) {
+    if (!FD->hasBody())
       return;
-    }
 
-    for (const FunctionDecl *Fun : FunctionsToBeChecked) {
-      if (Fun->getDeclName() == FD->getDeclName()) {
+    for (const FunctionDecl *Fun : FunctionsToBeChecked)
+      if (Fun->getDeclName() == FD->getDeclName())
         return;
-      }
-    }
+
     FunctionsToBeChecked.push_back(FD);
   }
 
   void checkDestructorLater(const CXXRecordDecl *D) {
-    if (!D->hasDefinition() || D->hasIrrelevantDestructor()) {
+    if (!D->hasDefinition() || D->hasIrrelevantDestructor())
       return;
-    }
 
     const CXXMethodDecl *Destructor = D->getDestructor();
     checkFunctionLater(static_cast<const FunctionDecl *>(Destructor));
@@ -64,23 +61,20 @@ protected:
       }
 
       const CXXRecordDecl *FieldRecordDecl = FieldType->getAsCXXRecordDecl();
-      if (!FieldRecordDecl) {
+      if (!FieldRecordDecl)
         continue;
-      }
 
       checkDestructorLater(FieldRecordDecl);
     }
 
     for (const CXXBaseSpecifier Base : D->bases()) {
       const Type *BaseType = Base.getType().getTypePtrOrNull();
-      if (!BaseType) {
+      if (!BaseType)
         continue;
-      }
 
       const CXXRecordDecl *BaseRecordDecl = BaseType->getAsCXXRecordDecl();
-      if (!BaseRecordDecl) {
+      if (!BaseRecordDecl)
         continue;
-      }
 
       checkDestructorLater(BaseRecordDecl);
     }
@@ -88,9 +82,9 @@ protected:
 
 public:
   bool VisitCallExpr(CallExpr *CE) {
-    if (!isa_and_nonnull<FunctionDecl>(CE->getCalleeDecl())) {
+    if (!isa_and_nonnull<FunctionDecl>(CE->getCalleeDecl()))
       return true;
-    }
+
     const auto *FD = dyn_cast<FunctionDecl>(CE->getCalleeDecl());
 
     if (const auto *DD = dyn_cast<CXXDestructorDecl>(FD)) {
@@ -104,19 +98,16 @@ public:
   }
 
   bool VisitVarDecl(VarDecl *VD) {
-    if (VD->isStaticLocal()) {
+    if (VD->isStaticLocal())
       return true;
-    }
 
     const Type *DT = VD->getType().getTypePtrOrNull();
-    if (!DT) {
+    if (!DT)
       return true;
-    }
 
     const CXXRecordDecl *DeleteDecl = DT->getAsCXXRecordDecl();
-    if (!DeleteDecl) {
+    if (!DeleteDecl)
       return true;
-    }
 
     checkDestructorLater(DeleteDecl);
     return true;
@@ -139,14 +130,12 @@ public:
 
   bool VisitCXXDeleteExpr(CXXDeleteExpr *DE) {
     const Type *DeleteType = DE->getDestroyedType().getTypePtrOrNull();
-    if (!DeleteType) {
+    if (!DeleteType)
       return true;
-    }
 
     const CXXRecordDecl *DeleteDecl = DeleteType->getAsCXXRecordDecl();
-    if (!DeleteDecl) {
+    if (!DeleteDecl)
       return true;
-    }
 
     checkDestructorLater(DeleteDecl);
     return true;
@@ -166,24 +155,21 @@ private:
     for (size_t I = 0; I < FunctionsToBeChecked.size(); ++I) {
       const FunctionDecl *Func = FunctionsToBeChecked[I];
 
-      if (const auto *Constructor = dyn_cast<CXXConstructorDecl>(Func)) {
-        for (const CXXCtorInitializer *Init : Constructor->inits()) {
+      if (const auto *Constructor = dyn_cast<CXXConstructorDecl>(Func))
+        for (const CXXCtorInitializer *Init : Constructor->inits())
           RecursiveASTVisitor<T>::TraverseStmt(Init->getInit());
-        }
-      }
 
       // Look at the function parameters as well. They get destroyed at the end
       // of the scope.
       for (const ParmVarDecl *Param : Func->parameters()) {
         const Type *ParamType = Param->getType().getTypePtrOrNull();
-        if (!ParamType) {
+        if (!ParamType)
           continue;
-        }
 
         const CXXRecordDecl *TypeDecl = ParamType->getAsCXXRecordDecl();
-        if (!TypeDecl) {
+        if (!TypeDecl)
           continue;
-        }
+
         checkDestructorLater(TypeDecl);
       }
 
