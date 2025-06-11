@@ -19,11 +19,7 @@ namespace {
 //
 // The unchecked versions represent reads/writes that are not handled by
 // -Wunsequenced. (e.g. accesses inside functions).
-enum AccessKind : uint8_t {
-  AkRead = 0,
-  AkWrite,
-  AkLast
-};
+enum AccessKind : uint8_t { AkRead = 0, AkWrite, AkLast };
 
 static constexpr uint8_t AkCount = AkLast;
 
@@ -307,7 +303,7 @@ void UnsequencedGlobalAccessesCheck::check(
   const llvm::SmallVector<TraversalAggregation> &Globals =
       Visitor.getGlobalsFound();
 
-  for (const TraversalAggregation& Global : Globals)
+  for (const TraversalAggregation &Global : Globals)
     if (Global.shouldBeReported())
       diag(E->getBeginLoc(), "read/write conflict on global variable " +
                                  Global.getDeclName().getAsString());
@@ -315,7 +311,7 @@ void UnsequencedGlobalAccessesCheck::check(
   const llvm::SmallVector<ObjectTraversalAggregation> &ObjectGlobals =
       Visitor.getObjectGlobalsFound();
 
-  for (const ObjectTraversalAggregation& ObjectGlobal : ObjectGlobals)
+  for (const ObjectTraversalAggregation &ObjectGlobal : ObjectGlobals)
     if (ObjectGlobal.shouldBeReported())
       diag(E->getBeginLoc(), "read/write conflict on the field of the global "
                              "object " +
@@ -541,7 +537,7 @@ void GlobalRWVisitor::addGlobal(DeclarationName Name, SourceLocation Loc,
                                 bool IsWrite) {
   AccessKind Access = IsWrite ? AkWrite : AkRead;
 
-  for (TraversalAggregation& Global : GlobalsFound) {
+  for (TraversalAggregation &Global : GlobalsFound) {
     if (Global.getDeclName() == Name) {
       Global.addGlobalRW(Loc, Access, TraversalIndex);
       return;
@@ -556,7 +552,7 @@ void GlobalRWVisitor::addField(DeclarationName Name,
                                bool IsWrite) {
   AccessKind Access = IsWrite ? AkWrite : AkRead;
 
-  for (ObjectTraversalAggregation& ObjectGlobal : ObjectGlobalsFound) {
+  for (ObjectTraversalAggregation &ObjectGlobal : ObjectGlobalsFound) {
     if (ObjectGlobal.getDeclName() == Name) {
       ObjectGlobal.addFieldRW(Loc, FieldIndices, Access, TraversalIndex);
       return;
@@ -607,8 +603,7 @@ void TraversalAggregation::addGlobalRW(SourceLocation Loc, AccessKind Access,
     break;
   }
   case AkRead: {
-    if (!(MainPart.Kind & TrWrite) &&
-        (OtherPart.Kind & TrWrite))
+    if (!(MainPart.Kind & TrWrite) && (OtherPart.Kind & TrWrite))
       MainPart = OtherPart;
     OtherPart = TraversalResult(Index, Loc, Access);
     break;
@@ -630,8 +625,7 @@ bool TraversalAggregation::hasTwoAccesses() const {
 }
 
 bool TraversalAggregation::hasConflictingOperations() const {
-  return hasTwoAccesses() &&
-         ((MainPart.Kind | OtherPart.Kind) & TrWrite);
+  return hasTwoAccesses() && ((MainPart.Kind | OtherPart.Kind) & TrWrite);
 }
 
 bool TraversalAggregation::shouldBeReported() const {
