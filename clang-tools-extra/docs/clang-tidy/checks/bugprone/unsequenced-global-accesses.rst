@@ -72,29 +72,29 @@ Options
 
 .. option:: HandleMutableFunctionParametersAsWrites
     
-    When ``true``, treat function calls with mutable reference or pointer
-    parameters as writes to the parameter.
-    
-    The default value is ``false``.
-    
-    For example, the following code block will get flagged if
-    ``HandleMutableFunctionParametersAsWrites`` is ``true``:
-
-    .. code-block:: c++
-    
-        void func(int& a);
-        int globalVar;
-    
-        int main() {
-            // func could write to globalVar here
-            int a = globalVar + func(globalVar);
-        }
-    
-    When ``HandleMutableFunctionParametersAsWrites`` is set to `true`, the
-    ``func(globalVar)`` call is treated as a write to ``globalVar``. Because no
-    sequencing is defined for the ``+`` operator, a write to ``globalVar``
-    inside ``c`` would be undefined behavior.
-    
-    When ``HandleMutableFunctionParametersAsWrites`` is set to ``false``, the
-    expression does not get flagged as it is only treated as a read from
-    ``globalVar``.
+  When ``true``, treat function calls with mutable reference or pointer
+  parameters as writes to the parameter.
+  
+  The default value is ``false``.
+  
+  For example, the following code block will get flagged if
+  ``HandleMutableFunctionParametersAsWrites`` is ``true``:
+  
+  .. code-block:: c++
+  
+      void func(int& a);
+      int globalVar;
+  
+      int main() {
+          // func could write to globalVar here
+          int a = globalVar + func(globalVar);
+      }
+  
+  When ``HandleMutableFunctionParametersAsWrites`` is set to `true`, the
+  ``func(globalVar)`` call is treated as a write to ``globalVar``. Because no
+  sequencing is defined for the ``+`` operator, a write to ``globalVar``
+  inside ``c`` would be undefined behavior.
+  
+  When ``HandleMutableFunctionParametersAsWrites`` is set to ``false``, the
+  expression does not get flagged as it is only treated as a read from
+  ``globalVar``.
