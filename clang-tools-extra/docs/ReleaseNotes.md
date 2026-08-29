@@ -102,6 +102,11 @@ infrastructure are described first, followed by tool-specific sections.
 
 #### New checks
 
+- New {doc}`bugprone-SideEffectsOutsideConeOfEvaluation
+  <clang-tidy/checks/bugprone/SideEffectsOutsideConeOfEvaluation>` check.
+
+  FIXME: Write a short description.
+
 - New {doc}`performance-expensive-value-or
   <clang-tidy/checks/performance/expensive-value-or>` check.
 

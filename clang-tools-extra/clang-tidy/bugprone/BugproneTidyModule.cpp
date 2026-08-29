@@ -72,6 +72,7 @@
 #include "ReservedIdentifierCheck.h"
 #include "ReturnConstRefFromParameterCheck.h"
 #include "SharedPtrArrayMismatchCheck.h"
+#include "SideEffectOutsideConeOfEvaluationCheck.h"
 #include "SignalHandlerCheck.h"
 #include "SignedBitwiseCheck.h"
 #include "SignedCharMisuseCheck.h"
@@ -251,6 +252,8 @@ public:
         "bugprone-reserved-identifier");
     CheckFactories.registerCheck<SharedPtrArrayMismatchCheck>(
         "bugprone-shared-ptr-array-mismatch");
+    CheckFactories.registerCheck<SideEffectOutsideConeOfEvaluationCheck>(
+        "bugprone-side-effect-outside-cone-of-evaluation");
     CheckFactories.registerCheck<SignalHandlerCheck>("bugprone-signal-handler");
     CheckFactories.registerCheck<SignedBitwiseCheck>("bugprone-signed-bitwise");
     CheckFactories.registerCheck<SignedCharMisuseCheck>(

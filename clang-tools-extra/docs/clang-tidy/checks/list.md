@@ -76,6 +76,7 @@ readability/*
 | {doc}`android-comparison-in-temp-failure-retry <android/comparison-in-temp-failure-retry>` |  |
 | {doc}`boost-use-ranges <boost/use-ranges>` | Yes |
 | {doc}`boost-use-to-string <boost/use-to-string>` | Yes |
+| {doc}`bugprone-SideEffectsOutsideConeOfEvaluation <bugprone/SideEffectsOutsideConeOfEvaluation>` | Yes |
 | {doc}`bugprone-argument-comment <bugprone/argument-comment>` | Yes |
 | {doc}`bugprone-assert-side-effect <bugprone/assert-side-effect>` |  |
 | {doc}`bugprone-assignment-in-if-condition <bugprone/assignment-in-if-condition>` |  |
