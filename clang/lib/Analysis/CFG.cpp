@@ -2890,6 +2890,15 @@ CFGBlock *CFGBuilder::VisitCallExpr(CallExpr *C, AddStmtChoice asc) {
 
   bool AddEHEdge = false;
 
+  Stmt* Body = nullptr;
+
+  if (BuildOpts.InterProcedural) {
+      Decl* D = C->getCalleeDecl();
+      if (auto* FD = dyn_cast_or_null<FunctionDecl>(D)) {
+          Body = FD->getBody();
+      }
+  }
+
   // Languages without exceptions are assumed to not throw.
   if (Context->getLangOpts().Exceptions) {
     if (BuildOpts.AddEHEdges)
@@ -2930,11 +2939,27 @@ CFGBlock *CFGBuilder::VisitCallExpr(CallExpr *C, AddStmtChoice asc) {
     return Visit(C->getCallee());
   }
 
-  if (!NoReturn && !AddEHEdge) {
+  if (!NoReturn && !AddEHEdge && !Body) {
     autoCreateBlock();
     appendCall(Block, C);
 
     return VisitCallExprChildren(C);
+  }
+
+  if (Body) {
+      // CFGBlock* CurrentSucc = Succ;
+      // CFGBlock* CurrentBlock = Block;
+
+      Succ = Block;
+      Block = nullptr;
+
+      CFGBlock* BodyBlock = addStmt(Body);
+
+      Succ = BodyBlock;
+      Block = nullptr; 
+
+      // Block = CurrentBlock;
+      // Succ = CurrentSucc;
   }
 
   if (Block) {
@@ -2950,7 +2975,7 @@ CFGBlock *CFGBuilder::VisitCallExpr(CallExpr *C, AddStmtChoice asc) {
 
   appendCall(Block, C);
 
-  if (AddEHEdge) {
+  if (AddEHEdge && !Body) {
     // Add exceptional edges.
     if (TryTerminatedBlock)
       addSuccessor(Block, TryTerminatedBlock);
@@ -3405,8 +3430,10 @@ CFGBlock *CFGBuilder::VisitReturnStmt(Stmt *S) {
   //       block will be able to report such dead blocks.
   assert(isa<ReturnStmt>(S) || isa<CoreturnStmt>(S));
 
+  bool HasSucc = BuildOpts.InterProcedural && Succ;
+
   // Create the new block.
-  Block = createBlock(false);
+  Block = createBlock(HasSucc);
 
   addAutomaticObjHandling(ScopePos, LocalScope::const_iterator(), S);
 
@@ -3417,7 +3444,7 @@ CFGBlock *CFGBuilder::VisitReturnStmt(Stmt *S) {
 
   // If the one of the destructors does not return, we already have the Exit
   // block as a successor.
-  if (!Block->hasNoReturnElement())
+  if (!Block->hasNoReturnElement() && !HasSucc)
     addSuccessor(Block, &cfg->getExit());
 
   // Add the return statement to the block.

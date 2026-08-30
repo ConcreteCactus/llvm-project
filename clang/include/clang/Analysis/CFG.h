@@ -1306,6 +1306,7 @@ public:
     bool AddVirtualBaseBranches = false;
     bool OmitImplicitValueInitializers = false;
     bool AssumeReachableDefaultInSwitchStatements = false;
+    bool InterProcedural = false;
 
     BuildOptions() = default;
 

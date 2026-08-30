@@ -49,12 +49,12 @@ public:
   /// Builds an `AdornedCFG` from a `FunctionDecl`.
   /// `Func.doesThisDeclarationHaveABody()` must be true, and
   /// `Func.isTemplated()` must be false.
-  static llvm::Expected<AdornedCFG> build(const FunctionDecl &Func);
+  static llvm::Expected<AdornedCFG> build(const FunctionDecl &Func, bool InterProcedural = false);
 
   /// Builds an `AdornedCFG` from an AST node. `D` is the function in which
   /// `S` resides. `D.isTemplated()` must be false.
   static llvm::Expected<AdornedCFG> build(const Decl &D, Stmt &S,
-                                          ASTContext &C);
+                                          ASTContext &C, bool InterProcedural = false);
 
   /// Returns the `Decl` containing the statement used to construct the CFG, if
   /// available.

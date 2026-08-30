@@ -45,7 +45,7 @@ void SideEffectOutsideConeOfEvaluationCheck::check(
       if (const auto* D = dyn_cast<FunctionDecl>(CallE->getCalleeDecl())) {
           Diagnoser Diagnoser;
           auto SideEffects = dataflow::diagnoseFunction<Model, Diagnostic>(
-                  *D, *Result.Context, Diagnoser);
+                  *D, *Result.Context, Diagnoser, 1'000'000'000, 20'000, true);
           if (SideEffects) {
               for (const Diagnostic& SE : *SideEffects) {
                   diag(SE.Range.getBegin(), "side effect outside cone of eval");

@@ -132,17 +132,17 @@ StmtToBlockMap::StmtToBlockMap(const CFG &Cfg)
 
 } // namespace internal
 
-llvm::Expected<AdornedCFG> AdornedCFG::build(const FunctionDecl &Func) {
+llvm::Expected<AdornedCFG> AdornedCFG::build(const FunctionDecl &Func, bool InterProcedural) {
   if (!Func.doesThisDeclarationHaveABody())
     return llvm::createStringError(
         std::make_error_code(std::errc::invalid_argument),
         "Cannot analyze function without a body");
 
-  return build(Func, *Func.getBody(), Func.getASTContext());
+  return build(Func, *Func.getBody(), Func.getASTContext(), InterProcedural);
 }
 
 llvm::Expected<AdornedCFG> AdornedCFG::build(const Decl &D, Stmt &S,
-                                             ASTContext &C) {
+                                             ASTContext &C, bool InterProcedural) {
   if (D.isTemplated())
     return llvm::createStringError(
         std::make_error_code(std::errc::invalid_argument),
@@ -163,6 +163,7 @@ llvm::Expected<AdornedCFG> AdornedCFG::build(const Decl &D, Stmt &S,
   Options.AddCXXDefaultInitExprInCtors = true;
   Options.AddLifetime = true;
   Options.AddParameterLifetimes = true;
+  Options.InterProcedural = InterProcedural;
 
   // Ensure that all sub-expressions in basic blocks are evaluated.
   Options.setAllAlwaysAdd();

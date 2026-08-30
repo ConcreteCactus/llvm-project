@@ -23,6 +23,7 @@ void DeclaredVariablesLattice::addDecl(const ValueDecl* D) {
 void DeclaredVariablesLattice::removeDecl(const ValueDecl* D) {
     const auto iter = declarations.find(D);
     if (iter != declarations.end()) {
+        // TODO: check if we could skip the find
         declarations.erase(iter);
     }
 }
@@ -98,29 +99,33 @@ void SideEffectOutsideConeOfEvaluationModel::transfer(
         }
         return;
     }
-    //
-    // if (const auto* Op = dyn_cast<const UnaryOperator>(S)) {
-    //     switch (Op->getOpcode()) {
-    //         case UO_AddrOf:
-    //             markOrigin(Op, isExprOutside(Op->getSubExpr(), L, Env), Env);
-    //             break;
-    //         default:
-    //             break;
-    //     }
-    //     return;
+    
+    if (const auto* Op = dyn_cast<const UnaryOperator>(S)) {
+        switch (Op->getOpcode()) {
+            case UO_AddrOf:
+                markOrigin(Op, isExprOutside(Op->getSubExpr(), L, Env), Env);
+                break;
+            default:
+                break;
+        }
+        return;
+    }
+    
+    if (const auto* C = dyn_cast<const CastExpr>(S)) {
+        QualType CastedType = C->getType();
+        QualType OriginalType = C->getSubExpr()->getType();
+        if (CastedType.getNonReferenceType() == OriginalType) {
+            markOrigin(C, isExprOutside(C->getSubExpr(), L, Env), Env);
+        }
+        return;
+    }
+
+    // if (const auto* L = dyn_cast<const IntegerLiteral>(S)) {
+    //     assert(L->getValue() != 42);
     // }
-    //
-    // if (const auto* C = dyn_cast<const CastExpr>(S)) {
-    //     QualType CastedType = C->getType();
-    //     QualType OriginalType = C->getSubExpr()->getType();
-    //     if (CastedType.getNonReferenceType() == OriginalType) {
-    //         markOrigin(C, isExprOutside(C->getSubExpr(), L, Env), Env);
-    //     }
-    //     return;
-    // }
-    //
-    // // TODO: add test for lambda captured variables
-    // // TODO: add test for malloc new calloc stuff like that
+    
+    // TODO: add test for lambda captured variables
+    // TODO: add test for malloc new calloc stuff like that
 
 }
 
