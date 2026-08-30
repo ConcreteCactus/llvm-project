@@ -6,25 +6,7 @@ namespace dataflow {
 bool DeclaredVariablesLattice::operator==(const DeclaredVariablesLattice& other)
     const
 {
-    if (other.declarations.size() != declarations.size()) {
-        return false;
-    }
-
-    int blocks = declarations.size();
-    for (int i = blocks - 1; i >= 0; i--) {
-        if (other.declarations[i].size() != declarations[i].size()) {
-            return false;
-        }
-
-        int decls = declarations[i].size();
-        if (decls > 0 &&
-                other.declarations[i][decls - 1] != declarations[i][decls - 1])
-        {
-            return false;
-        }
-    }
-
-    return true;
+    return declarations == other.declarations;
 }
 
 LatticeJoinEffect DeclaredVariablesLattice::join(
@@ -34,30 +16,19 @@ LatticeJoinEffect DeclaredVariablesLattice::join(
     return LatticeJoinEffect::Unchanged;
 }
 
-void DeclaredVariablesLattice::addBlock() {
-    declarations.emplace_back();
-}
-
-void DeclaredVariablesLattice::removeBlock() {
-    declarations.pop_back();
-}
-
 void DeclaredVariablesLattice::addDecl(const ValueDecl* D) {
-    declarations[declarations.size() - 1].push_back(D);
+    declarations.insert(D);
+}
+
+void DeclaredVariablesLattice::removeDecl(const ValueDecl* D) {
+    const auto iter = declarations.find(D);
+    if (iter != declarations.end()) {
+        declarations.erase(iter);
+    }
 }
 
 bool DeclaredVariablesLattice::hasDecl(const ValueDecl* D) const {
-    int blocks = declarations.size();
-    for (int i = blocks - 1; i >= 0; i--) {
-        int decls = declarations[i].size();
-        for (int j = decls - 1; j >= 0; j--) {
-            if (declarations[i][j] == D) {
-                return true;
-            }
-        }
-    }
-
-    return false;
+    return declarations.contains(D);
 }
 
 // TODO write a testcase where the declaration is a field
@@ -110,11 +81,12 @@ SideEffectOutsideConeOfEvaluationModel::SideEffectOutsideConeOfEvaluationModel(
 void SideEffectOutsideConeOfEvaluationModel::transfer(
         const CFGElement &Elt, DeclaredVariablesLattice &L, Environment &Env)
 {
-    if (Elt.getKind() == CFGElement::Kind::ScopeBegin) {
-        L.addBlock();
-    } else if (Elt.getKind() != CFGElement::Kind::ScopeEnd) {
-        L.removeBlock();
-    } else if (Elt.getKind() != CFGElement::Kind::Statement) {
+    if (Elt.getKind() == CFGElement::Kind::LifetimeEnds) {
+        L.removeDecl(static_cast<const CFGLifetimeEnds*>(&Elt)->getVarDecl());
+        return;
+    }
+
+    if (Elt.getKind() != CFGElement::Kind::Statement) {
         return;
     }
 
@@ -124,29 +96,31 @@ void SideEffectOutsideConeOfEvaluationModel::transfer(
         if (const auto* VD = dyn_cast<const ValueDecl>(DS->getSingleDecl())) {
             L.addDecl(VD);
         }
-    }
-
-    if (const auto* Op = dyn_cast<const UnaryOperator>(S)) {
-        switch (Op->getOpcode()) {
-            case UO_AddrOf:
-                markOrigin(Op, isExprOutside(Op->getSubExpr(), L, Env), Env);
-                break;
-            default:
-                break;
-        }
         return;
     }
-
-    if (const auto* C = dyn_cast<const CastExpr>(S)) {
-        QualType CastedType = C->getType();
-        QualType OriginalType = C->getSubExpr()->getType();
-        if (CastedType.getNonReferenceType() == OriginalType) {
-            markOrigin(C, isExprOutside(C->getSubExpr(), L, Env), Env);
-        }
-    }
-
-    // TODO: add test for lambda captured variables
-    // TODO: add test for malloc new calloc stuff like that
+    //
+    // if (const auto* Op = dyn_cast<const UnaryOperator>(S)) {
+    //     switch (Op->getOpcode()) {
+    //         case UO_AddrOf:
+    //             markOrigin(Op, isExprOutside(Op->getSubExpr(), L, Env), Env);
+    //             break;
+    //         default:
+    //             break;
+    //     }
+    //     return;
+    // }
+    //
+    // if (const auto* C = dyn_cast<const CastExpr>(S)) {
+    //     QualType CastedType = C->getType();
+    //     QualType OriginalType = C->getSubExpr()->getType();
+    //     if (CastedType.getNonReferenceType() == OriginalType) {
+    //         markOrigin(C, isExprOutside(C->getSubExpr(), L, Env), Env);
+    //     }
+    //     return;
+    // }
+    //
+    // // TODO: add test for lambda captured variables
+    // // TODO: add test for malloc new calloc stuff like that
 
 }
 

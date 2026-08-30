@@ -11,16 +11,17 @@ class SideEffectOutsideConeOfEvaluationDiagnosis;
 
 class DeclaredVariablesLattice {
 public:
+    DeclaredVariablesLattice() {
+    }
     bool operator==(const DeclaredVariablesLattice& other) const;
     LatticeJoinEffect join(const DeclaredVariablesLattice& other);
 
-    void addBlock();
-    void removeBlock();
     void addDecl(const ValueDecl* D);
+    void removeDecl(const ValueDecl* D);
     bool hasDecl(const ValueDecl* D) const;
 
 private:
-    llvm::SmallVector<llvm::SmallVector<const ValueDecl*>> declarations;
+    llvm::DenseSet<const ValueDecl*> declarations;
 };
 
 class SideEffectOutsideConeOfEvaluationModel :

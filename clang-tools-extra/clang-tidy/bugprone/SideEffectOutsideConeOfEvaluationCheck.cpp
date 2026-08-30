@@ -16,12 +16,19 @@ namespace clang::tidy::bugprone {
 
 void SideEffectOutsideConeOfEvaluationCheck::registerMatchers(MatchFinder *Finder) {
   // FIXME: Add matchers.
+
+  auto Somewhere = [](const ast_matchers::internal::Matcher<Stmt>& M) {
+      return anyOf(M, hasDescendant(M));
+  };
   const ast_matchers::internal::Matcher<Stmt>& Interest =
-      expr(anyOf(callExpr(), unaryOperator(), binaryOperator())).bind("x");
+      anyOf(Somewhere(unaryOperator().bind("x")),
+            Somewhere(binaryOperator().bind("x")),
+            Somewhere(callExpr().bind("x")));
+
   const ast_matchers::internal::Matcher<Stmt>& SMatcher = 
       callExpr(callee(functionDecl(
                       hasName("contract_assert"))),
-                      hasArgument(0, anyOf(Interest, hasDescendant(Interest))));
+                      hasArgument(0, Interest));
   Finder->addMatcher(SMatcher, this);
 }
 
